@@ -130,7 +130,15 @@ func (self *SSimpleToken) HasSystemAdminPrivilege() bool {
 	return self.IsAdmin() && self.Project == "system"
 }
 
-func (this *SSimpleToken) IsAllow(scope rbacutils.TRbacScope, service string, resource string, action string, extra ...string) bool {
+func (this *SSimpleToken) IsAllow(scope rbacutils.TRbacScope, service string, resource string, action string, extra ...string) rbacutils.SPolicyResult {
+	if this.isAllow(scope, service, resource, action, extra...) {
+		return rbacutils.PolicyAllow
+	} else {
+		return rbacutils.PolicyDeny
+	}
+}
+
+func (this *SSimpleToken) isAllow(scope rbacutils.TRbacScope, service string, resource string, action string, extra ...string) bool {
 	if scope == rbacutils.ScopeSystem || scope == rbacutils.ScopeDomain {
 		return this.HasSystemAdminPrivilege()
 	} else {
@@ -146,11 +154,11 @@ func (self *SSimpleToken) Len() int {
 	return 0
 }
 
-func (self *SSimpleToken) GetServiceURL(service, region, zone, endpointType string) (string, error) {
+func (self *SSimpleToken) getServiceURL(service, region, zone, endpointType string) (string, error) {
 	return "", fmt.Errorf("Not available")
 }
 
-func (self *SSimpleToken) GetServiceURLs(service, region, zone, endpointType string) ([]string, error) {
+func (self *SSimpleToken) getServiceURLs(service, region, zone, endpointType string) ([]string, error) {
 	return nil, fmt.Errorf("Not available")
 }
 

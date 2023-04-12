@@ -42,20 +42,20 @@ type SElasticipCreateInput struct {
 	//
 	//
 	//
-	// | 平台		|	支持类型			|
-	// | ---		|	--------			|
-	// |Aliyun		| traffic, bandwidth	|
-	// |腾讯云		| traffic				|
-	// |Azure		| traffic				|
-	// |Google		| traffic, bandwidth	|
-	// |Ucloud		| traffic				|
-	// |Aws			| traffic				|
-	// |华为云		| traffic, bandwidth	|
-	// |天翼云		| traffic, bandwidth	|
-	// |KVM			| 不支持创建			|
-	// |VMware		| 不支持创建			|
-	// |ZStack		| traffic				|
-	// |OpenStack	| traffic				|
+	// | 平台       |    支持类型            |
+	// | ---        |    --------            |
+	// |Aliyun      | traffic, bandwidth    |
+	// |腾讯云      | traffic                |
+	// |Azure       | traffic                |
+	// |Google      | traffic, bandwidth    |
+	// |Ucloud      | traffic                |
+	// |Aws         | traffic                |
+	// |华为云      | traffic, bandwidth    |
+	// |天翼云      | traffic, bandwidth    |
+	// |KVM         | 不支持创建            |
+	// |VMware      | 不支持创建            |
+	// |ZStack      | traffic                |
+	// |OpenStack   | traffic                |
 	// default: traffic
 	// enum: traffic, bandwidth
 	ChargeType string `json:"charge_type"`
@@ -103,4 +103,14 @@ type ElasticipAssociateInput struct {
 	// enmu: server, natgateway
 	// default: server
 	InstanceType string `json:"instance_type"`
+
+	// EIP映射的内网IP地址，可选
+	IpAddr string `json:"ip_addr"`
+}
+
+type ElasticDissociateInput struct {
+	// 注意: 若关联到aws NAT网关后，目前没办法解除关联关系
+	// 是否解绑后自动删除弹性公网IP
+	// default: false
+	AutoDelete bool `json:"auto_delete"`
 }

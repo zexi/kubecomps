@@ -10,23 +10,20 @@ require (
 	github.com/containerd/containerd v1.4.1-0.20201204210828-e98d7f8eaafc // indirect
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/ghodss/yaml v1.0.0
-	github.com/go-sql-driver/mysql v1.5.0
+	github.com/go-sql-driver/mysql v1.6.0
 	github.com/gofrs/flock v0.8.0
 	github.com/gorilla/mux v1.7.3
-	github.com/kr/text v0.2.0 // indirect
 	github.com/minio/minio-go/v7 v7.0.6
-	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/openshift/api v0.0.0-20200929171550-c99a4deebbe5
 	github.com/openshift/client-go v0.0.0-20200929181438-91d71ef2122c
 	github.com/projectcalico/libcalico-go v1.7.2-0.20201119184045-34d8399da148
-	github.com/smartystreets/goconvey v1.6.4
-	github.com/stretchr/testify v1.6.1
+	github.com/smartystreets/goconvey v1.7.2
+	github.com/stretchr/testify v1.8.1
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20200819165624-17cef6e3e9d5
-	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5
-	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
-	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
+	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	gopkg.in/go-playground/validator.v9 v9.29.1 // indirect
-	gopkg.in/yaml.v2 v2.3.0
+	gopkg.in/yaml.v2 v2.4.0
 	helm.sh/helm/v3 v3.4.1
 	k8s.io/api v0.19.4
 	k8s.io/apimachinery v0.19.4
@@ -43,11 +40,16 @@ require (
 	sigs.k8s.io/controller-runtime v0.6.4
 	sigs.k8s.io/yaml v1.2.0
 	yunion.io/x/code-generator v0.0.0-20211009131119-fdd7452b40a7
-	yunion.io/x/jsonutils v0.0.0-20211105163012-d846c05a3c9a
-	yunion.io/x/log v0.0.0-20201210064738-43181789dc74
-	yunion.io/x/onecloud v0.0.0-20211110042210-d07702c57f15
-	yunion.io/x/pkg v0.0.0-20210918114143-ce839f862c5f
-	yunion.io/x/sqlchemy v0.0.0-20210918113031-c1c107f37ada
+	yunion.io/x/jsonutils v1.0.1-0.20220819091305-3bab322ab4fd
+	yunion.io/x/log v1.0.0
+	yunion.io/x/onecloud v0.3.9-9
+	yunion.io/x/pkg v1.0.1-0.20230327034731-79f520e7d373
+	yunion.io/x/sqlchemy v1.1.2-0.20230326161357-912d44dd66d6
+)
+
+replace (
+	github.com/go-logr/logr => github.com/go-logr/logr v0.4.0
+	github.com/jaypipes/ghw => github.com/zexi/ghw v0.9.1
 )
 
 replace (

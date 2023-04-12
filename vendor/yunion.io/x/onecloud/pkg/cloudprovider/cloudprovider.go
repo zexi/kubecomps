@@ -85,6 +85,9 @@ type SCloudaccountCredential struct {
 	//秘钥key (Qcloud)
 	SecretKey string `json:"secret_key"`
 
+	// 飞天允许的最高组织id, 默认为1
+	OrganizationId int `json:"organization_id"`
+
 	// Google服务账号email (gcp)
 	GCPClientEmail string `json:"gcp_client_email"`
 	// Google服务账号project id (gcp)
@@ -94,11 +97,16 @@ type SCloudaccountCredential struct {
 	// Google服务账号秘钥 (gcp)
 	GCPPrivateKey string `json:"gcp_private_key"`
 
-	// 阿里云专有云Endpoints
-	*SApsaraEndpoints
+	// 默认区域Id, Apara及HCSO需要此参数
+	// example: cn-north-2
+	// required: true
+	DefaultRegion string `default:"$DEFAULT_REGION" metavar:"$DEFAULT_REGION"`
 
 	// Huawei Cloud Stack Online
 	*SHCSOEndpoints
+
+	// ctyun crm account extra info
+	*SCtyunExtraOptions
 }
 
 type SCloudaccount struct {
@@ -106,38 +114,38 @@ type SCloudaccount struct {
 	//
 	//
 	//
-	// | 云平台		|字段				| 翻译				| 是否必传	| 默认值	| 可否更新	| 获取方式	|
-	// | ------ 	|------				| ------			| ---------	| --------	|--------	|--------	|
-	// |Aliyun	 	|access_key_id		|秘钥ID				| 是		|			|	是		|			|
-	// |Aliyun		|access_key_secret	|秘钥Key			| 是		|			|	是		|			|
-	// |Qcloud	 	|app_id				|APP ID				| 是		|			|	否		|			|
-	// |Qcloud		|secret_id			|秘钥ID				| 是		|			|	是		|			|
-	// |Qcloud		|secret_key			|秘钥Key			| 是		|			|	是		|			|
-	// |OpenStack	|project_name		|用户所在项目 		| 是		|			|	是		|			|
-	// |OpenStack	|username			|用户名				| 是		|			|	是		|			|
-	// |OpenStack	|password			|用户密码			| 是		|			|	是		|			|
-	// |OpenStack	|auth_url			|认证地址			| 是		|			|	否		|			|
-	// |OpenStack	|domain_name		|用户所在的域		| 否		|Default	|	是		|			|
-	// |VMware		|username			|用户名				| 是		|			|	是		|			|
-	// |VMware		|password			|密码				| 是		|			|	是		|			|
-	// |VMware		|host				|主机IP或域名		| 是		|			|	否		|			|
-	// |VMware		|port				|主机端口			| 否		|443		|	否		|			|
-	// |Azure		|directory_id		|目录ID				| 是		|			|	否		|			|
-	// |Azure		|environment		|区域				| 是		|			|	否		|			|
-	// |Azure		|client_id			|客户端ID			| 是		|			|	是		|			|
-	// |Azure		|client_secret		|客户端密码			| 是		|			|	是		|			|
-	// |Huawei		|access_key_id		|秘钥ID				| 是		|			|	是		|			|
-	// |Huawei		|access_key_secret	|秘钥				| 是		|			|	是		|			|
-	// |Huawei		|environment		|区域				| 是		|			|	否		|			|
-	// |Aws			|access_key_id		|秘钥ID				| 是		|			|	是		|			|
-	// |Aws			|access_key_secret	|秘钥				| 是		|			|	是		|			|
-	// |Aws			|environment		|区域				| 是		|			|	否		|			|
-	// |Ucloud		|access_key_id		|秘钥ID				| 是		|			|	是		|			|
-	// |Ucloud		|access_key_secret	|秘钥				| 是		|			|	是		|			|
-	// |Google		|project_id			|项目ID				| 是		|			|	否		|			|
-	// |Google		|client_email		|客户端email		| 是		|			|	否		|			|
-	// |Google		|private_key_id		|秘钥ID				| 是		|			|	是		|			|
-	// |Google		|private_key		|秘钥Key			| 是		|			|	是		|			|
+	// | 云平台     |字段                | 翻译              | 是否必传  | 默认值    | 可否更新      | 获取方式   |
+	// | ------     |------              | ------            | --------- | --------  |--------       |--------    |
+	// |Aliyun      |access_key_id       |秘钥ID             | 是        |            |    是        |            |
+	// |Aliyun      |access_key_secret   |秘钥Key            | 是        |            |    是        |            |
+	// |Qcloud      |app_id              |APP ID             | 是        |            |    否        |            |
+	// |Qcloud      |secret_id           |秘钥ID             | 是        |            |    是        |            |
+	// |Qcloud      |secret_key          |秘钥Key            | 是        |            |    是        |            |
+	// |OpenStack   |project_name        |用户所在项目       | 是        |            |    是        |            |
+	// |OpenStack   |username            |用户名             | 是        |            |    是        |            |
+	// |OpenStack   |password            |用户密码           | 是        |            |    是        |            |
+	// |OpenStack   |auth_url            |认证地址           | 是        |            |    否        |            |
+	// |OpenStack   |domain_name         |用户所在的域       | 否        |Default     |    是        |            |
+	// |VMware      |username            |用户名             | 是        |            |    是        |            |
+	// |VMware      |password            |密码               | 是        |            |    是        |            |
+	// |VMware      |host                |主机IP或域名       | 是        |            |    否        |            |
+	// |VMware      |port                |主机端口           | 否        |443         |    否        |            |
+	// |Azure       |directory_id        |目录ID             | 是        |            |    否        |            |
+	// |Azure       |environment         |区域               | 是        |            |    否        |            |
+	// |Azure       |client_id           |客户端ID           | 是        |            |    是        |            |
+	// |Azure       |client_secret       |客户端密码         | 是        |            |    是        |            |
+	// |Huawei      |access_key_id       |秘钥ID             | 是        |            |    是        |            |
+	// |Huawei      |access_key_secret   |秘钥               | 是        |            |    是        |            |
+	// |Huawei      |environment         |区域               | 是        |            |    否        |            |
+	// |Aws         |access_key_id       |秘钥ID             | 是        |            |    是        |            |
+	// |Aws         |access_key_secret   |秘钥               | 是        |            |    是        |            |
+	// |Aws         |environment         |区域               | 是        |            |    否        |            |
+	// |Ucloud      |access_key_id       |秘钥ID             | 是        |            |    是        |            |
+	// |Ucloud      |access_key_secret   |秘钥               | 是        |            |    是        |            |
+	// |Google      |project_id          |项目ID             | 是        |            |    否        |            |
+	// |Google      |client_email        |客户端email        | 是        |            |    否        |            |
+	// |Google      |private_key_id      |秘钥ID             | 是        |            |    是        |            |
+	// |Google      |private_key         |秘钥Key            | 是        |            |    是        |            |
 	Account string `json:"account"`
 
 	// swagger:ignore
@@ -158,11 +166,16 @@ type ProviderConfig struct {
 	Account string
 	Secret  string
 
+	ReadOnly bool
+
 	AccountId string
 
 	Options *jsonutils.JSONDict
 
-	ProxyFunc httputils.TransportProxyFunc
+	DefaultRegion string
+	ProxyFunc     httputils.TransportProxyFunc
+
+	UpdatePermission func(service, permission string)
 }
 
 func (cp *ProviderConfig) AdaptiveTimeoutHttpClient() *http.Client {
@@ -176,6 +189,7 @@ type SProviderInfo struct {
 	Url     string
 	Account string
 	Secret  string
+	Options *jsonutils.JSONDict
 }
 
 type ICloudProviderFactory interface {
@@ -261,7 +275,6 @@ type ICloudProvider interface {
 	GetObjectCannedAcls(regionId string) []string
 
 	GetCapabilities() []string
-	GetICloudQuotas() ([]ICloudQuota, error)
 
 	IsClouduserSupportPassword() bool
 	GetICloudusers() ([]IClouduser, error)
@@ -290,20 +303,35 @@ type ICloudProvider interface {
 	GetICloudDnsZoneById(id string) (ICloudDnsZone, error)
 	CreateICloudDnsZone(opts *SDnsZoneCreateOptions) (ICloudDnsZone, error)
 
+	GetICloudGlobalVpcs() ([]ICloudGlobalVpc, error)
+	CreateICloudGlobalVpc(opts *GlobalVpcCreateOptions) (ICloudGlobalVpc, error)
+	GetICloudGlobalVpcById(id string) (ICloudGlobalVpc, error)
+
 	GetICloudInterVpcNetworks() ([]ICloudInterVpcNetwork, error)
 	GetICloudInterVpcNetworkById(id string) (ICloudInterVpcNetwork, error)
 	CreateICloudInterVpcNetwork(opts *SInterVpcNetworkCreateOptions) (ICloudInterVpcNetwork, error)
 
 	GetICloudCDNDomains() ([]ICloudCDNDomain, error)
 	GetICloudCDNDomainByName(name string) (ICloudCDNDomain, error)
+	CreateICloudCDNDomain(opts *CdnCreateOptions) (ICloudCDNDomain, error)
+
+	GetMetrics(opts *MetricListOptions) ([]MetricValues, error)
 }
 
 func IsSupportCapability(prod ICloudProvider, capa string) bool {
 	return utils.IsInStringArray(capa, prod.GetCapabilities()) || utils.IsInStringArray(capa+READ_ONLY_SUFFIX, prod.GetCapabilities())
 }
 
+func IsSupportCDN(prod ICloudProvider) bool {
+	return IsSupportCapability(prod, CLOUD_CAPABILITY_CDN)
+}
+
 func IsSupportProject(prod ICloudProvider) bool {
 	return IsSupportCapability(prod, CLOUD_CAPABILITY_PROJECT)
+}
+
+func IsSupportQuota(prod ICloudProvider) bool {
+	return IsSupportCapability(prod, CLOUD_CAPABILITY_QUOTA)
 }
 
 func IsSupportDnsZone(prod ICloudProvider) bool {
@@ -366,6 +394,14 @@ func IsSupportContainer(prod ICloudProvider) bool {
 	return IsSupportCapability(prod, CLOUD_CAPABILITY_CONTAINER)
 }
 
+func IsSupportTablestore(prod ICloudProvider) bool {
+	return IsSupportCapability(prod, CLOUD_CAPABILITY_TABLESTORE)
+}
+
+func IsSupportModelartsPool(prod ICloudProvider) bool {
+	return IsSupportCapability(prod, CLOUD_CAPABILITY_MODELARTES)
+}
+
 var providerTable map[string]ICloudProviderFactory
 
 func init() {
@@ -400,7 +436,7 @@ func GetProvider(cfg ProviderConfig) (ICloudProvider, error) {
 	return driver.GetProvider(cfg)
 }
 
-func GetClientRC(name, accessUrl, account, secret, provider string) (map[string]string, error) {
+func GetClientRC(name, accessUrl, account, secret, provider string, options *jsonutils.JSONDict) (map[string]string, error) {
 	driver, err := GetProviderFactory(provider)
 	if err != nil {
 		return nil, errors.Wrap(err, "GetProviderFactory")
@@ -410,6 +446,7 @@ func GetClientRC(name, accessUrl, account, secret, provider string) (map[string]
 		Url:     accessUrl,
 		Account: account,
 		Secret:  secret,
+		Options: options,
 	}
 	return driver.GetClientRC(info)
 }
@@ -440,10 +477,6 @@ func (provider *SBaseProvider) GetFactory() ICloudProviderFactory {
 }
 
 func (self *SBaseProvider) GetOnPremiseIRegion() (ICloudRegion, error) {
-	return nil, ErrNotImplemented
-}
-
-func (self *SBaseProvider) GetICloudQuotas() ([]ICloudQuota, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -563,12 +596,48 @@ func (self *SBaseProvider) CreateICloudInterVpcNetwork(opts *SInterVpcNetworkCre
 	return nil, ErrNotImplemented
 }
 
+func (self *SBaseProvider) GetICloudGlobalVpcs() ([]ICloudGlobalVpc, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "GetICloudGlobalVpcs")
+}
+
+func (self *SBaseProvider) GetICloudGlobalVpcById(id string) (ICloudGlobalVpc, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "GetICloudGlobalVpcById")
+}
+
+func (self *SBaseProvider) CreateICloudGlobalVpc(opts *GlobalVpcCreateOptions) (ICloudGlobalVpc, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "CreateICloudGlobalVpc")
+}
+
 func (self *SBaseProvider) GetICloudCDNDomains() ([]ICloudCDNDomain, error) {
 	return nil, errors.Wrapf(ErrNotImplemented, "GetICloudCDNDomains")
 }
 
 func (self *SBaseProvider) GetICloudCDNDomainByName(name string) (ICloudCDNDomain, error) {
 	return nil, errors.Wrapf(ErrNotImplemented, "GetICloudCDNDomainByName")
+}
+
+func (self *SBaseProvider) CreateICloudCDNDomain(opts *CdnCreateOptions) (ICloudCDNDomain, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "CreateICloudCDNDomain")
+}
+
+func (self *SBaseProvider) GetMetrics(opts *MetricListOptions) ([]MetricValues, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "GetMetric")
+}
+
+func (self *SBaseProvider) GetIModelartsPools() ([]ICloudModelartsPool, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "GetIModelartsPools")
+}
+
+func (self *SBaseProvider) GetIModelartsPoolById(id string) (ICloudModelartsPool, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "GetIModelartsPoolDetail")
+}
+
+func (self *SBaseProvider) CreateIModelartsPool(pool *ModelartsPoolCreateOption) (ICloudModelartsPool, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "CreateIModelartsPool")
+}
+
+func (self *SBaseProvider) GetIModelartsPoolSku() ([]ICloudModelartsPoolSku, error) {
+	return nil, errors.Wrapf(ErrNotImplemented, "GetIModelartsPoolSku")
 }
 
 func NewBaseProvider(factory ICloudProviderFactory) SBaseProvider {
@@ -860,4 +929,31 @@ func (factory *SPrivateCloudBaseProviderFactory) IsSupportPrepaidResources() boo
 
 func (factory *SPrivateCloudBaseProviderFactory) NeedSyncSkuFromCloud() bool {
 	return true
+}
+
+type ICloudModelartsPool interface {
+	ICloudResource
+	IBillingResource
+
+	Delete() error
+	GetProjectId() string
+	GetInstanceType() string
+	GetWorkType() string
+	GetNodeCount() int
+	ChangeConfig(opts *ModelartsPoolChangeConfigOptions) error
+}
+
+type ICloudModelartsPoolSku interface {
+	ICloudResource
+
+	GetCpuCoreCount() int
+	GetCpuArch() string
+	GetStatus() string
+	GetMemorySizeMB() int
+	GetPoolType() string
+	GetGpuSize() int
+	GetGpuType() string
+	GetNpuSize() int
+	GetNpuType() string
+	GetProcessorType() string
 }

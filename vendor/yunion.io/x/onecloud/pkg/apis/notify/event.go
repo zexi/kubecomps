@@ -44,6 +44,22 @@ var (
 	ActionSyncUpdate SAction = "sync_update"
 	ActionSyncDelete SAction = "sync_delete"
 
+	ActionOffline         SAction = "offline"
+	ActionSystemPanic     SAction = "panic"
+	ActionSystemException SAction = "exception"
+
+	ActionChecksumTest SAction = "checksum_test"
+
+	ActionLock SAction = "lock"
+
+	ActionExceedCount        SAction = "exceed_count"
+	ActionSyncAccountStatus  SAction = "sync_account_status"
+	ActionPasswordExpireSoon SAction = "password_expire_soon"
+	ActionWorkerBlock        SAction = "woker_block"
+	ActionNetOutOfSync       SAction = "net_out_of_sync"
+	ActionMysqlOutOfSync     SAction = "mysql_out_of_sync"
+	ActionServiceAbnormal    SAction = "service_abnormal"
+
 	ResultFailed  SResult = "failed"
 	ResultSucceed SResult = "succeed"
 )

@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"fmt"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"yunion.io/x/jsonutils"
@@ -35,6 +36,7 @@ import (
 	modules "yunion.io/x/onecloud/pkg/mcclient/modules/identity"
 	"yunion.io/x/onecloud/pkg/util/httputils"
 	"yunion.io/x/onecloud/pkg/util/stringutils2"
+	"yunion.io/x/onecloud/pkg/util/tagutils"
 )
 
 var (
@@ -53,6 +55,15 @@ type STenant struct {
 	SKeystoneCacheObject
 }
 
+func (t *STenant) GetTags() tagutils.TTagSet {
+	objType := "project"
+	if t.Domain == identityapi.KeystoneDomainRoot && t.DomainId == identityapi.KeystoneDomainRoot {
+		objType = "domain"
+	}
+	tags, _ := Metadata.rawGetAll(objType, t.Id, nil, "")
+	return tagutils.Map2Tagset(tags)
+}
+
 func NewTenant(idStr string, name string, domainId string, domainName string) STenant {
 	return STenant{SKeystoneCacheObject: NewKeystoneCacheObject(idStr, name, domainId, domainName)}
 }
@@ -68,7 +79,13 @@ func (tenant *STenant) GetModelManager() IModelManager {
 var TenantCacheManager *STenantCacheManager
 
 func init() {
-	TenantCacheManager = &STenantCacheManager{NewKeystoneCacheObjectManager(STenant{}, "tenant_cache_tbl", "tenant", "tenants")}
+	TenantCacheManager = &STenantCacheManager{
+		SKeystoneCacheObjectManager: NewKeystoneCacheObjectManager(
+			STenant{},
+			"tenant_cache_tbl",
+			"tenant",
+			"tenants",
+		)}
 	// log.Debugf("Initialize tenant cache manager %s %s", TenantCacheManager.KeywordPlural(), TenantCacheManager)
 
 	TenantCacheManager.SetVirtualObject(TenantCacheManager)
@@ -86,7 +103,7 @@ func RegistUserCredCacheUpdater() {
 
 func onAuthCompleteUpdateCache(ctx context.Context, userCred mcclient.TokenCredential) {
 	TenantCacheManager.updateTenantCache(ctx, userCred)
-	UserCacheManager.updateUserCache(userCred)
+	UserCacheManager.updateUserCache(ctx, userCred)
 }
 
 func (manager *STenantCacheManager) InitializeData() error {
@@ -110,8 +127,13 @@ func (manager *STenantCacheManager) InitializeData() error {
 }
 
 func (manager *STenantCacheManager) updateTenantCache(ctx context.Context, userCred mcclient.TokenCredential) {
-	manager.Save(ctx, userCred.GetProjectId(), userCred.GetProjectName(),
-		userCred.GetProjectDomainId(), userCred.GetProjectDomain())
+	item := SCachedTenant{
+		Id:            userCred.GetProjectId(),
+		Name:          userCred.GetProjectName(),
+		DomainId:      userCred.GetProjectDomainId(),
+		ProjectDomain: userCred.GetProjectDomain(),
+	}
+	manager.Save(ctx, item, false)
 }
 
 func (manager *STenantCacheManager) GetTenantQuery(fields ...string) *sqlchemy.SQuery {
@@ -209,7 +231,7 @@ func (manager *STenantCacheManager) fetchTenantFromKeystone(ctx context.Context,
 	query := jsonutils.NewDict()
 	query.Set("scope", jsonutils.NewString("system"))
 
-	s := auth.GetAdminSession(ctx, consts.GetRegion(), "v1")
+	s := auth.GetAdminSession(ctx, consts.GetRegion())
 	tenant, err := modules.Projects.GetById(s, idStr, query)
 	if err != nil {
 		if je, ok := err.(*httputils.JSONClientError); ok && je.Code == 404 {
@@ -218,12 +240,12 @@ func (manager *STenantCacheManager) fetchTenantFromKeystone(ctx context.Context,
 		log.Errorf("fetch project %s fail %s", idStr, err)
 		return nil, errors.Wrap(err, "modules.Projects.Get")
 	}
-	tenantId, _ := tenant.GetString("id")
-	tenantName, _ := tenant.GetString("name")
-	domainId, _ := tenant.GetString("domain_id")
-	domainName, _ := tenant.GetString("project_domain")
-	// manager.Save(ctx, domainId, domainName, identityapi.KeystoneDomainRoot, identityapi.KeystoneDomainRoot)
-	return manager.Save(ctx, tenantId, tenantName, domainId, domainName)
+	var item SCachedTenant
+	err = tenant.Unmarshal(&item)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unmarshal %s", tenant)
+	}
+	return manager.Save(ctx, item, true)
 }
 
 func (manager *STenantCacheManager) FetchDomainByIdOrName(ctx context.Context, idStr string) (*STenant, error) {
@@ -264,7 +286,7 @@ func (manager *STenantCacheManager) fetchDomainFromKeystone(ctx context.Context,
 		log.Debugf("fetch empty domain!!!!\n%s", debug.Stack())
 		return nil, fmt.Errorf("Empty idStr")
 	}
-	s := auth.GetAdminSession(ctx, consts.GetRegion(), "v1")
+	s := auth.GetAdminSession(ctx, consts.GetRegion())
 	tenant, err := modules.Domains.GetById(s, idStr, nil)
 	if err != nil {
 		if je, ok := err.(*httputils.JSONClientError); ok && je.Code == 404 {
@@ -273,9 +295,14 @@ func (manager *STenantCacheManager) fetchDomainFromKeystone(ctx context.Context,
 		log.Errorf("fetch project %s fail %s", idStr, err)
 		return nil, errors.Wrap(err, "modules.Projects.Get")
 	}
-	tenantId, err := tenant.GetString("id")
-	tenantName, err := tenant.GetString("name")
-	return manager.Save(ctx, tenantId, tenantName, identityapi.KeystoneDomainRoot, identityapi.KeystoneDomainRoot)
+	var item SCachedTenant
+	err = tenant.Unmarshal(&item)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unmarshal %s", tenant)
+	}
+	item.DomainId = identityapi.KeystoneDomainRoot
+	item.ProjectDomain = identityapi.KeystoneDomainRoot
+	return manager.Save(ctx, item, true)
 }
 
 func (manager *STenantCacheManager) Delete(ctx context.Context, idStr string) error {
@@ -293,50 +320,59 @@ func (manager *STenantCacheManager) Delete(ctx context.Context, idStr string) er
 	return objo.Delete(ctx, nil)
 }
 
-func (manager *STenantCacheManager) Save(ctx context.Context, idStr string, name string, domainId string, domain string) (*STenant, error) {
-	lockman.LockRawObject(ctx, manager.KeywordPlural(), idStr)
-	defer lockman.ReleaseRawObject(ctx, manager.KeywordPlural(), idStr)
+func (manager *STenantCacheManager) Save(ctx context.Context, item SCachedTenant, saveMeta bool) (*STenant, error) {
+	lockman.LockRawObject(ctx, manager.KeywordPlural(), item.Id)
+	defer lockman.ReleaseRawObject(ctx, manager.KeywordPlural(), item.Id)
 
-	objo, err := manager.FetchById(idStr)
+	objo, err := manager.FetchById(item.Id)
 	if err != nil && err != sql.ErrNoRows {
 		log.Errorf("FetchTenantbyId fail %s", err)
-		return nil, err
+		return nil, errors.Wrapf(err, "TenantCache FetchById %s", item.Id)
 	}
 	now := time.Now().UTC()
 	if err == nil {
 		obj := objo.(*STenant)
-		if obj.Id == idStr && obj.Name == name && obj.Domain == domain && obj.DomainId == domainId {
+		if obj.Id == item.Id && obj.Name == item.Name && obj.Domain == item.ProjectDomain && obj.DomainId == item.DomainId {
 			Update(obj, func() error {
 				obj.LastCheck = now
 				return nil
 			})
+			if saveMeta {
+				Metadata.rawSetValues(ctx, item.objType(), item.Id, item.Metadata, true, "")
+			}
 			return obj, nil
 		}
 		_, err = Update(obj, func() error {
-			obj.Id = idStr
-			obj.Name = name
-			obj.Domain = domain
-			obj.DomainId = domainId
+			obj.Id = item.Id
+			obj.Name = item.Name
+			obj.Domain = item.ProjectDomain
+			obj.DomainId = item.DomainId
 			obj.LastCheck = now
 			return nil
 		})
 		if err != nil {
 			return nil, err
 		} else {
+			if saveMeta {
+				Metadata.rawSetValues(ctx, item.objType(), item.Id, item.Metadata, true, "")
+			}
 			return obj, nil
 		}
 	} else {
 		objm, err := NewModelObject(manager)
 		obj := objm.(*STenant)
-		obj.Id = idStr
-		obj.Name = name
-		obj.Domain = domain
-		obj.DomainId = domainId
+		obj.Id = item.Id
+		obj.Name = item.Name
+		obj.Domain = item.ProjectDomain
+		obj.DomainId = item.DomainId
 		obj.LastCheck = now
 		err = manager.TableSpec().InsertOrUpdate(ctx, obj)
 		if err != nil {
 			return nil, errors.Wrap(err, "InsertOrUpdate")
 		} else {
+			if saveMeta {
+				Metadata.rawSetValues(ctx, item.objType(), item.Id, item.Metadata, true, "")
+			}
 			return obj, nil
 		}
 	}
@@ -385,20 +421,23 @@ func (manager *STenantCacheManager) fetchDomainTenantsFromKeystone(ctx context.C
 		return fmt.Errorf("Empty domainId")
 	}
 
-	s := auth.GetAdminSession(ctx, consts.GetRegion(), "v1")
-	params := jsonutils.Marshal(map[string]string{"domain_id": domainId})
+	s := auth.GetAdminSession(ctx, consts.GetRegion())
+	params := jsonutils.NewDict()
+	params.Add(jsonutils.NewString(domainId), "domain_id")
+	params.Add(jsonutils.JSONTrue, "details")
 	tenants, err := modules.Projects.List(s, params)
 	if err != nil {
 		return errors.Wrap(err, "Projects.List")
 	}
 	for _, tenant := range tenants.Data {
-		tenantId, _ := tenant.GetString("id")
-		tenantName, _ := tenant.GetString("name")
-		domainId, _ := tenant.GetString("domain_id")
-		domainName, _ := tenant.GetString("project_domain")
-		_, err = manager.Save(ctx, tenantId, tenantName, domainId, domainName)
+		var item SCachedTenant
+		err := tenant.Unmarshal(&item)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "Unmarshal %s", tenant)
+		}
+		_, err = manager.Save(ctx, item, true)
+		if err != nil {
+			return errors.Wrap(err, "save")
 		}
 	}
 	return nil
@@ -481,4 +520,27 @@ func (tenant *STenant) IsDomain() bool {
 	} else {
 		return false
 	}
+}
+
+func (tenant *STenant) objType() string {
+	if tenant.IsDomain() {
+		return "domain"
+	} else {
+		return "project"
+	}
+}
+
+func (tenant *STenant) GetAllClassMetadata() (map[string]string, error) {
+	meta, err := Metadata.rawGetAll(tenant.objType(), tenant.GetId(), nil, CLASS_TAG_PREFIX)
+	if err != nil {
+		return nil, errors.Wrap(err, "rawGetAll")
+	}
+	ret := make(map[string]string)
+	for k, v := range meta {
+		if strings.HasPrefix(k, SYSTEM_ADMIN_PREFIX) {
+			continue
+		}
+		ret[k[len(CLASS_TAG_PREFIX):]] = v
+	}
+	return ret, nil
 }

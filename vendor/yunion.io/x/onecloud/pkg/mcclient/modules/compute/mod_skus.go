@@ -45,16 +45,16 @@ type ElasticcacheSkusManager struct {
 }
 
 var (
-	CloudmetaSkus    SkusManager             // meta.yunion.io
+	// CloudmetaSkus    SkusManager             // meta.yunion.io
 	OfflineCloudmeta OfflineCloudmetaManager // aliyun offine sku&rate data
 	ServerSkus       ServerSkusManager       // region service: server sku manager
 	ElasticcacheSkus ElasticcacheSkusManager // region service: elasitc cache sku manager
 )
 
 func init() {
-	CloudmetaSkus = SkusManager{modules.NewCloudmetaManager("sku", "skus",
-		[]string{},
-		[]string{})}
+	// CloudmetaSkus = SkusManager{modules.NewCloudmetaManager("sku", "skus",
+	// 	[]string{},
+	//	[]string{})}
 
 	OfflineCloudmeta = OfflineCloudmetaManager{modules.NewOfflineCloudmetaManager("", "",
 		[]string{},
@@ -73,7 +73,7 @@ func init() {
 		[]string{},
 		[]string{})}
 
-	modules.Register(&CloudmetaSkus)
+	// modules.Register(&CloudmetaSkus)
 	modules.RegisterCompute(&ServerSkus)
 	modules.RegisterCompute(&ElasticcacheSkus)
 }
@@ -92,7 +92,7 @@ func (self *SkusManager) GetSkus(s *mcclient.ClientSession, providerId, regionId
 }
 
 func (self *OfflineCloudmetaManager) GetSkuSourcesMeta(s *mcclient.ClientSession, client *http.Client) (jsonutils.JSONObject, error) {
-	baseUrl, err := s.GetServiceVersionURL(self.ServiceType(), self.EndpointType(), self.GetApiVersion())
+	baseUrl, err := s.GetServiceVersionURL(self.ServiceType(), self.EndpointType())
 	if err != nil {
 		return nil, err
 	}

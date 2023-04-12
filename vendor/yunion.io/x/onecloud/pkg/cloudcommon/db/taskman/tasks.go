@@ -19,7 +19,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"reflect"
 	"runtime/debug"
 	"strconv"
@@ -33,9 +32,11 @@ import (
 	"yunion.io/x/pkg/util/reflectutils"
 	"yunion.io/x/pkg/util/stringutils"
 	"yunion.io/x/pkg/util/timeutils"
+	"yunion.io/x/pkg/util/version"
 	"yunion.io/x/pkg/utils"
 	"yunion.io/x/sqlchemy"
 
+	"yunion.io/x/onecloud/pkg/apis"
 	"yunion.io/x/onecloud/pkg/appctx"
 	"yunion.io/x/onecloud/pkg/cloudcommon/db"
 	"yunion.io/x/onecloud/pkg/cloudcommon/db/lockman"
@@ -44,6 +45,7 @@ import (
 	"yunion.io/x/onecloud/pkg/mcclient"
 	"yunion.io/x/onecloud/pkg/mcclient/auth"
 	"yunion.io/x/onecloud/pkg/util/httputils"
+	"yunion.io/x/onecloud/pkg/util/logclient"
 	"yunion.io/x/onecloud/pkg/util/rbacutils"
 )
 
@@ -95,6 +97,10 @@ type STask struct {
 
 	taskObject  db.IStandaloneModel   `ignore:"true"`
 	taskObjects []db.IStandaloneModel `ignore:"true"`
+}
+
+func (manager *STaskManager) CreateByInsertOrUpdate() bool {
+	return false
 }
 
 func (manager *STaskManager) AllowListItems(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
@@ -161,8 +167,12 @@ func (manager *STaskManager) FilterByOwner(q *sqlchemy.SQuery, owner mcclient.II
 	return q
 }
 
+func (manager *STaskManager) FetchTaskById(taskId string) *STask {
+	return manager.fetchTask(taskId)
+}
+
 func (self *STask) AllowGetDetails(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return db.IsAdminAllowGet(userCred, self) || userCred.GetProjectId() == self.UserCred.GetProjectId()
+	return db.IsAdminAllowGet(ctx, userCred, self) || userCred.GetProjectId() == self.UserCred.GetProjectId()
 }
 
 func (self *STask) AllowUpdateItem(ctx context.Context, userCred mcclient.TokenCredential) bool {
@@ -542,9 +552,25 @@ func execITask(taskValue reflect.Value, task *STask, odata jsonutils.JSONObject,
 			SetStageFailedFuncValue.Call(
 				[]reflect.Value{
 					reflect.ValueOf(ctx),
-					reflect.ValueOf(fmt.Sprintf("%v", r)),
+					reflect.ValueOf(jsonutils.NewString(fmt.Sprintf("%v", r))),
 				},
 			)
+			obj, err := objResManager.FetchById(task.ObjId)
+			if err != nil {
+				return
+			}
+			statusObj, ok := obj.(db.IStatusStandaloneModel)
+			if ok {
+				db.StatusBaseSetStatus(statusObj, task.GetUserCred(), apis.STATUS_UNKNOWN, fmt.Sprintf("%v", r))
+			}
+			notes := map[string]interface{}{
+				"Stack":   string(debug.Stack()),
+				"Version": version.GetShortString(),
+				"Task":    task.TaskName,
+				"Stage":   stageName,
+				"Message": fmt.Sprintf("%v", r),
+			}
+			logclient.AddSimpleActionLog(obj, logclient.ACT_PANIC, notes, task.GetUserCred(), false)
 		}
 	}()
 
@@ -592,12 +618,15 @@ func (self *STask) GetRequestContext() appctx.AppContextData {
 }
 
 func (self *STask) SaveRequestContext(data *appctx.AppContextData) {
+	jsonData := jsonutils.Marshal(data)
+	log.Debugf("SaveRequestContext %s param %s", jsonData, self.Params)
 	_, err := db.Update(self, func() error {
 		params := self.Params.CopyExcludes(REQUEST_CONTEXT_KEY)
-		params.Add(jsonutils.Marshal(data), REQUEST_CONTEXT_KEY)
+		params.Add(jsonData, REQUEST_CONTEXT_KEY)
 		self.Params = params
 		return nil
 	})
+	log.Debugf("Params: %s", self.Params)
 	if err != nil {
 		log.Errorf("save_request_context fail %s", err)
 	}
@@ -828,7 +857,7 @@ func (task *STask) GetTaskRequestHeader() http.Header {
 	header := mcclient.GetTokenHeaders(userCred)
 	header.Set(mcclient.TASK_ID, task.GetTaskId())
 	if len(serviceUrl) > 0 {
-		notifyUrl := filepath.Join(serviceUrl, "tasks", task.GetTaskId())
+		notifyUrl := fmt.Sprintf("%s/tasks/%s", serviceUrl, task.GetTaskId())
 		header.Set(mcclient.TASK_NOTIFY_URL, notifyUrl)
 	}
 	return header

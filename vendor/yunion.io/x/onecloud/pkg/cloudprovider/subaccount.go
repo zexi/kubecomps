@@ -24,12 +24,15 @@ import (
 type SSubAccount struct {
 	// 若Account不为空，可不传
 	Name string
+	// 描述信息
+	Desc string
 	// 输入必填，若为空，需要指定子账号名称
 	Account          string
 	HealthStatus     string // 云端服务健康状态。例如欠费、项目冻结都属于不健康状态。
 	DefaultProjectId string // 默认云订阅项目Id
 }
 
+// +onecloud:model-api-gen
 type SubAccounts struct {
 	// 若输出则是全量子账号列表，若输入，代表允许同步的子账号
 	Accounts []SSubAccount

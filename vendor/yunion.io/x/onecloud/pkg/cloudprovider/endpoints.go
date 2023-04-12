@@ -21,21 +21,6 @@ import (
 	"yunion.io/x/pkg/utils"
 )
 
-type SApsaraEndpoints struct {
-	EcsEndpoint             string `default:"$APSARA_ECS_ENDPOINT" metavar:"APSARA_ECS_ENDPOINT"`
-	RdsEndpoint             string `default:"$APSARA_RDS_ENDPOINT"`
-	VpcEndpoint             string `default:"$APSARA_VPC_ENDPOINT"`
-	KvsEndpoint             string `default:"$APSARA_KVS_ENDPOINT"`
-	SlbEndpoint             string `default:"$APSARA_SLB_ENDPOINT"`
-	OssEndpoint             string `default:"$APSARA_OSS_ENDPOINT"`
-	StsEndpoint             string `default:"$APSARA_STS_ENDPOINT"`
-	ActionTrailEndpoint     string `default:"$APSARA_ACTION_TRAIL_ENDPOINT"`
-	RamEndpoint             string `default:"$APSARA_RAM_ENDPOINT"`
-	MetricsEndpoint         string `default:"$APSRRA_METRICS_ENDPOINT"`
-	ResourcemanagerEndpoint string `default:"$APSARA_RESOURCEMANAGER_ENDPOINT"`
-	DefaultRegion           string `default:"$APSARA_DEFAULT_REGION"`
-}
-
 // SHCSOEndpoints 华为私有云endpoints配置
 /*
 endpoint获取方式优先级：
@@ -47,12 +32,7 @@ type SHCSOEndpoints struct {
 	// 华为私有云Endpoint域名
 	// example: hcso.com.cn
 	// required:true
-	EndpointDomain string `default:"$HUAWEI_ENDPOINT_DOMAIN" metavar:"HUAWEI_ENDPOINT_DOMAIN"`
-
-	// 可用区ID
-	// example: cn-north-2
-	// required: true
-	DefaultRegion string `default:"$HUAWEI_DEFAULT_REGION" metavar:"$HUAWEI_DEFAULT_REGION"`
+	EndpointDomain string `default:"$HUAWEI_ENDPOINT_DOMAIN" metavar:"$HUAWEI_ENDPOINT_DOMAIN"`
 
 	// 默认DNS
 	// example: 10.125.0.26,10.125.0.27
@@ -101,15 +81,17 @@ type SHCSOEndpoints struct {
 	Eps string `default:"$HUAWEI_EPS_ENDPOINT"`
 	// 文件系统
 	SfsTurbo string `default:"$HUAWEI_SFS_TURBO_ENDPOINT"`
+	// Modelarts
+	Modelarts string `default:"$HUAWEI_MODELARTS_ENDPOINT"`
 }
 
-func (self *SHCSOEndpoints) GetEndpoint(serviceName string, region string) string {
+func (self *SHCSOEndpoints) GetEndpoint(defaultRegion, serviceName string, region string) string {
 	sn := utils.Kebab2Camel(serviceName, "-")
 	if self.caches == nil {
 		self.caches = make(map[string]string, 0)
 	}
 
-	key := self.DefaultRegion + "." + sn
+	key := defaultRegion + "." + sn
 	if len(region) > 0 {
 		key = region + "." + sn
 	}
@@ -129,11 +111,11 @@ func (self *SHCSOEndpoints) GetEndpoint(serviceName string, region string) strin
 	}
 
 	if len(endpoint) == 0 {
-		endpoint = strings.Join([]string{serviceName, self.DefaultRegion, self.EndpointDomain}, ".")
+		endpoint = strings.Join([]string{serviceName, defaultRegion, self.EndpointDomain}, ".")
 	}
 
 	if len(region) > 0 {
-		endpoint = strings.Replace(endpoint, self.DefaultRegion, region, 1)
+		endpoint = strings.Replace(endpoint, defaultRegion, region, 1)
 	}
 
 	self.caches[key] = endpoint

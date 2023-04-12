@@ -25,6 +25,9 @@ type GuestnetworkDetails struct {
 	Network string `json:"network"`
 	// 所属Wire
 	WireId string `json:"wire_id"`
+
+	// EipAddr associate with this guestnetwork
+	EipAddr string `json:"eip_addr"`
 }
 
 type GuestnetworkShortDesc struct {
@@ -87,6 +90,7 @@ type GuestnetworkJsonDesc struct {
 	Ifname     string               `json:"ifname"`
 	Masklen    int8                 `json:"masklen"`
 	Driver     string               `json:"driver"`
+	NumQueues  int                  `json:"num_queues"`
 	Vlan       int                  `json:"vlan"`
 	Bw         int                  `json:"bw"`
 	Mtu        int                  `json:"mtu"`

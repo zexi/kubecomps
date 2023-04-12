@@ -31,9 +31,16 @@ import (
 	"yunion.io/x/onecloud/pkg/cloudcommon/policy"
 	"yunion.io/x/onecloud/pkg/httperrors"
 	"yunion.io/x/onecloud/pkg/mcclient"
+	"yunion.io/x/onecloud/pkg/util/logclient"
 	"yunion.io/x/onecloud/pkg/util/rbacutils"
 	"yunion.io/x/onecloud/pkg/util/splitable"
 	"yunion.io/x/onecloud/pkg/util/stringutils2"
+)
+
+const (
+	COLUMN_RECORD_CHECKSUM = "record_checksum"
+	COLUMN_UPDATE_VERSION  = "update_version"
+	COLUMN_UPDATED_AT      = "updated_at"
 )
 
 type SModelBase struct {
@@ -53,13 +60,29 @@ type SModelBaseManager struct {
 }
 
 func NewModelBaseManager(model interface{}, tableName string, keyword string, keywordPlural string) SModelBaseManager {
-	return NewModelBaseManagerWithSplitable(model, tableName, keyword, keywordPlural, "", "", 0, 0)
+	return NewModelBaseManagerWithDBName(model, tableName, keyword, keywordPlural, sqlchemy.DefaultDB)
+}
+
+func NewModelBaseManagerWithDBName(model interface{}, tableName string, keyword string, keywordPlural string, dbName sqlchemy.DBName) SModelBaseManager {
+	return NewModelBaseManagerWithSplitableDBName(model, tableName, keyword, keywordPlural, "", "", 0, 0, dbName)
 }
 
 func NewModelBaseManagerWithSplitable(model interface{}, tableName string, keyword string, keywordPlural string, indexField string, dateField string, maxDuration time.Duration, maxSegments int) SModelBaseManager {
-	ts := newTableSpec(model, tableName, indexField, dateField, maxDuration, maxSegments)
-	modelMan := SModelBaseManager{tableSpec: ts, keyword: keyword, keywordPlural: keywordPlural}
+	return NewModelBaseManagerWithSplitableDBName(model, tableName, keyword, keywordPlural, indexField, dateField, maxDuration, maxSegments, sqlchemy.DefaultDB)
+}
+
+func NewModelBaseManagerWithSplitableDBName(model interface{}, tableName string, keyword string, keywordPlural string, indexField string, dateField string, maxDuration time.Duration, maxSegments int, dbName sqlchemy.DBName) SModelBaseManager {
+	ts := newTableSpec(model, tableName, indexField, dateField, maxDuration, maxSegments, dbName)
+	modelMan := SModelBaseManager{
+		tableSpec:     ts,
+		keyword:       keyword,
+		keywordPlural: keywordPlural,
+	}
 	return modelMan
+}
+
+func (manager *SModelBaseManager) CreateByInsertOrUpdate() bool {
+	return true
 }
 
 func (manager *SModelBaseManager) IsStandaloneManager() bool {
@@ -78,6 +101,14 @@ func (manager *SModelBaseManager) GetIModelManager() IModelManager {
 	return r
 }
 
+func (manager *SModelBaseManager) GetImmutableInstance(userCred mcclient.TokenCredential) IModelManager {
+	return manager.GetIModelManager()
+}
+
+func (manager *SModelBaseManager) GetMutableInstance(userCred mcclient.TokenCredential) IModelManager {
+	return manager.GetIModelManager()
+}
+
 func (manager *SModelBaseManager) SetAlias(alias string, aliasPlural string) {
 	manager.alias = alias
 	manager.aliasPlural = aliasPlural
@@ -88,7 +119,7 @@ func (manager *SModelBaseManager) TableSpec() ITableSpec {
 }
 
 func (manager *SModelBaseManager) GetSplitTable() *splitable.SSplitTableSpec {
-	return manager.tableSpec.GetSplitTable()
+	return manager.TableSpec().GetSplitTable()
 }
 
 func (manager *SModelBaseManager) Keyword() string {
@@ -173,7 +204,7 @@ func (manager *SModelBaseManager) ExtraSearchConditions(ctx context.Context, q *
 
 // fetch hook
 func (manager *SModelBaseManager) getTable() *sqlchemy.STable {
-	return manager.tableSpec.Instance()
+	return manager.TableSpec().Instance()
 }
 
 func (manager *SModelBaseManager) Query(fieldNames ...string) *sqlchemy.SQuery {
@@ -250,10 +281,6 @@ func (manager *SModelBaseManager) PerformAction(ctx context.Context, userCred mc
 	return nil, httperrors.NewActionNotFoundError("Action %s not found", action)
 }
 
-func (manager *SModelBaseManager) AllowPerformCheckCreateData(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, data jsonutils.JSONObject) bool {
-	return IsAllowClassPerform(rbacutils.ScopeSystem, userCred, manager, "check-create-data")
-}
-
 func (manager *SModelBaseManager) InitializeData() error {
 	return nil
 }
@@ -272,7 +299,8 @@ func (manager *SModelBaseManager) CustomizeHandlerInfo(info *appsrv.SHandlerInfo
 }
 
 func (manager *SModelBaseManager) SetHandlerProcessTimeout(info *appsrv.SHandlerInfo, r *http.Request) time.Duration {
-	if r.Method == http.MethodGet && len(r.URL.Query().Get("export_keys")) > 0 {
+	splitableExportPath := fmt.Sprintf("/%s/splitable-export", manager.KeywordPlural())
+	if r.Method == http.MethodGet && (len(r.URL.Query().Get("export_keys")) > 0 || r.URL.Path == splitableExportPath) {
 		return time.Hour * 2
 	}
 	return -time.Second
@@ -431,51 +459,102 @@ func (manager *SModelBaseManager) GetI18N(ctx context.Context, idstr string, res
 	return nil
 }
 
-func (manager *SModelBaseManager) AllowGetPropertySplitable(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return true
-}
-
 func (manager *SModelBaseManager) GetPropertySplitable(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) (jsonutils.JSONObject, error) {
-	splitable := manager.GetSplitTable()
-	if splitable == nil {
-		return nil, errors.Wrap(httperrors.ErrNotSupported, "not splitable")
+	stable := manager.GetIModelManager().GetImmutableInstance(userCred).GetSplitTable()
+	if stable == nil {
+		// generate a fake metadata tbl record
+		man := manager.GetIModelManager().GetImmutableInstance(userCred)
+		subq := man.Query().SubQuery()
+		q := subq.Query(
+			sqlchemy.MIN("start", subq.Field("id")),
+			sqlchemy.MAX("end", subq.Field("id")),
+			sqlchemy.MIN("start_date", subq.Field("ops_time")),
+			sqlchemy.MAX("end_date", subq.Field("ops_time")),
+			sqlchemy.COUNT("count", subq.Field("id")),
+			sqlchemy.MIN("created_at", subq.Field("ops_time")),
+		)
+		meta := splitable.STableMetadata{
+			Id:    1,
+			Table: "action_tbl",
+		}
+		err := q.First(&meta)
+		if err != nil {
+			return nil, errors.Wrap(err, "Query metadata")
+		}
+		metas := []splitable.STableMetadata{meta}
+		return jsonutils.Marshal(metas), nil
 	}
-	metas, err := splitable.GetTableMetas()
+	metas, err := stable.GetTableMetas()
 	if err != nil {
 		return nil, errors.Wrap(err, "GetTableMetas")
 	}
 	return jsonutils.Marshal(metas), nil
 }
 
+func (manager *SModelBaseManager) GetPropertySplitableExport(ctx context.Context, userCred mcclient.TokenCredential, input apis.SplitTableExportInput) (jsonutils.JSONObject, error) {
+	splitable := manager.GetIModelManager().GetImmutableInstance(userCred).GetSplitTable()
+	if splitable == nil {
+		return nil, errors.Wrap(httperrors.ErrNotSupported, "not splitable")
+	}
+	if len(input.Table) == 0 {
+		return nil, httperrors.NewMissingParameterError("table")
+	}
+
+	metas, err := splitable.GetTableMetas()
+	if err != nil {
+		return nil, errors.Wrap(err, "GetTableMetas")
+	}
+	for i := 0; i < len(metas); i += 1 {
+		if metas[i].Table == input.Table {
+			if input.Limit <= 0 {
+				input.Limit = apis.MAX_SPLITABLE_EXPORT_LIMIT
+			}
+			if input.Offset < 0 {
+				input.Offset = 0
+			}
+			q := splitable.GetTableSpec(metas[i]).Query().Limit(input.Limit).Offset(input.Offset)
+			resp, err := q.AllStringMap()
+			if err != nil {
+				return nil, errors.Wrapf(err, "q.AllStringMap")
+			}
+			exportId := fmt.Sprintf("%s(%d-%d)", metas[i].Table, metas[i].Start, metas[i].End)
+			obj := logclient.NewSimpleObject(exportId, exportId, manager.Keyword())
+			logclient.AddActionLogWithContext(ctx, obj, logclient.ACT_EXPORT, nil, userCred, true)
+			return jsonutils.Marshal(resp), nil
+		}
+	}
+	return nil, httperrors.NewResourceNotFoundError("table %s not found", input.Table)
+}
+
 func (manager *SModelBaseManager) AllowPerformPurgeSplitable(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, data jsonutils.JSONObject) bool {
 	return true
 }
 
-func (manager *SModelBaseManager) PerformPurgeSplitable(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, data jsonutils.JSONObject) (jsonutils.JSONObject, error) {
-	splitable := manager.GetSplitTable()
+func (manager *SModelBaseManager) PerformPurgeSplitable(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, input apis.PurgeSplitTableInput) (jsonutils.JSONObject, error) {
+	splitable := manager.GetIModelManager().GetImmutableInstance(userCred).GetSplitTable()
 	if splitable == nil {
-		return nil, errors.Wrap(httperrors.ErrNotSupported, "not splitable")
+		return jsonutils.Marshal(map[string][]string{"tables": []string{}}), nil
 	}
-	err := splitable.Purge()
+	ret, err := splitable.Purge(input.Tables)
 	if err != nil {
-		return nil, errors.Wrap(err, "Purge")
+		return nil, errors.Wrapf(err, "Purge")
 	}
-	return nil, nil
+	return jsonutils.Marshal(map[string][]string{"tables": ret}), nil
 }
 
-func (model *SModelBase) GetId() string {
+func (model SModelBase) GetId() string {
 	return ""
 }
 
-func (model *SModelBase) Keyword() string {
+func (model SModelBase) Keyword() string {
 	return model.GetModelManager().Keyword()
 }
 
-func (model *SModelBase) KeywordPlural() string {
+func (model SModelBase) KeywordPlural() string {
 	return model.GetModelManager().KeywordPlural()
 }
 
-func (model *SModelBase) GetName() string {
+func (model SModelBase) GetName() string {
 	return ""
 }
 

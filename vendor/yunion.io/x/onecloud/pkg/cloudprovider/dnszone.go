@@ -541,6 +541,8 @@ type DnsRecordSet struct {
 	Id         string
 	ExternalId string
 
+	Desc string
+
 	Enabled       bool
 	DnsName       string
 	DnsType       TDnsType
@@ -673,8 +675,9 @@ func CompareDnsRecordSet(iRecords []ICloudDnsRecordSet, local []DnsRecordSet, de
 		remoteRecord, ok := remoteMaps[key]
 		if ok {
 			record.ExternalId = remoteRecord.ExternalId
+			remoteRecord.Id = record.Id
 			if !record.Equals(remoteRecord) {
-				updated = append(updated, record)
+				updated = append(updated, remoteRecord)
 			} else {
 				common = append(common, record)
 			}

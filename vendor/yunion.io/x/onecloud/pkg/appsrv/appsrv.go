@@ -16,10 +16,12 @@ package appsrv
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -32,6 +34,7 @@ import (
 
 	"yunion.io/x/jsonutils"
 	"yunion.io/x/log"
+	"yunion.io/x/pkg/errors"
 	"yunion.io/x/pkg/trace"
 	"yunion.io/x/pkg/util/signalutils"
 	"yunion.io/x/pkg/utils"
@@ -40,6 +43,7 @@ import (
 	"yunion.io/x/onecloud/pkg/httperrors"
 	"yunion.io/x/onecloud/pkg/i18n"
 	"yunion.io/x/onecloud/pkg/proxy"
+	"yunion.io/x/onecloud/pkg/util/ctx"
 	"yunion.io/x/onecloud/pkg/util/httputils"
 )
 
@@ -66,6 +70,10 @@ type Application struct {
 	idleConnsClosed chan struct{}
 	httpServer      *http.Server
 	slaveHttpServer *http.Server
+
+	exception func(method, path string, body jsonutils.JSONObject, err error)
+
+	isTLS bool
 }
 
 const (
@@ -82,7 +90,7 @@ var quitHandlerRegisted bool
 
 func NewApplication(name string, connMax int, db bool) *Application {
 	app := Application{name: name,
-		context:           context.Background(),
+		context:           ctx.CtxWithTime(),
 		connMax:           connMax,
 		session:           NewWorkerManager("HttpRequestWorkerManager", connMax, DEFAULT_BACKLOG, db),
 		readSession:       NewWorkerManager("HttpGetRequestWorkerManager", connMax, DEFAULT_BACKLOG, db),
@@ -116,6 +124,11 @@ func NewApplication(name string, connMax int, db bool) *Application {
 	return &app
 }
 
+func (self *Application) OnException(exception func(method, path string, body jsonutils.JSONObject, err error)) *Application {
+	self.exception = exception
+	return self
+}
+
 func SplitPath(path string) []string {
 	ret := make([]string, 0)
 	for _, seg := range strings.Split(path, "/") {
@@ -147,9 +160,24 @@ func (app *Application) getRoot(method string) *RadixNode {
 }
 
 func (app *Application) AddReverseProxyHandler(prefix string, ef *proxy.SEndpointFactory, m proxy.RequestManipulator) {
+	app.AddReverseProxyHandlerWithCallbackConfig(prefix, ef, m,
+		func(method string, hi *SHandlerInfo) *SHandlerInfo {
+			return hi
+		},
+	)
+}
+
+func (app *Application) AddReverseProxyHandlerWithCallbackConfig(prefix string, ef *proxy.SEndpointFactory, m proxy.RequestManipulator, confCb func(string, *SHandlerInfo) *SHandlerInfo) {
 	handler := proxy.NewHTTPReverseProxy(ef, m).ServeHTTP
 	for _, method := range []string{"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"} {
-		app.AddHandler(method, prefix, handler)
+		hi := &SHandlerInfo{}
+		hi = confCb(method, hi)
+		if hi != nil {
+			hi.SetMethod(method)
+			hi.SetPath(prefix)
+			hi.SetHandler(handler)
+			app.AddHandler3(hi)
+		}
 	}
 }
 
@@ -177,6 +205,12 @@ func (app *Application) AddHandler3(hi *SHandlerInfo) *SHandlerInfo {
 type loggingResponseWriter struct {
 	http.ResponseWriter
 	status int
+	data   []byte
+}
+
+func (lrw *loggingResponseWriter) Write(data []byte) (int, error) {
+	lrw.data = data
+	return lrw.ResponseWriter.Write(data)
 }
 
 func (lrw *loggingResponseWriter) Hijack() (rwc net.Conn, buf *bufio.ReadWriter, err error) {
@@ -210,7 +244,7 @@ func (app *Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// log.Printf("defaultHandler %s %s", r.Method, r.URL.Path)
 	rid := genRequestId(w, r)
 	w.Header().Set("X-Request-Host-Id", app.hostId)
-	lrw := &loggingResponseWriter{w, http.StatusOK}
+	lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK, data: []byte{}}
 	start := time.Now()
 	hi, params := app.defaultHandle(lrw, r, rid)
 	if hi == nil {
@@ -223,6 +257,9 @@ func (app *Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		counter = &hi.counter4XX
 	} else {
 		counter = &hi.counter5XX
+		if app.exception != nil {
+			app.exception(r.Method, r.URL.String(), params.Body, errors.Errorf(string(lrw.data)))
+		}
 	}
 	duration := float64(time.Since(start).Nanoseconds()) / 1000000
 	counter.hit += 1
@@ -236,7 +273,14 @@ func (app *Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		skipLog = true
 	}
 	if !skipLog {
-		log.Infof("%s %d %s %s %s (%s) %.2fms", app.hostId, lrw.status, rid, r.Method, r.URL, r.RemoteAddr, duration)
+		peerServiceName := r.Header.Get("X-Yunion-Peer-Service-Name")
+		var remote string
+		if len(peerServiceName) > 0 {
+			remote = fmt.Sprintf("%s:%s", r.RemoteAddr, peerServiceName)
+		} else {
+			remote = r.RemoteAddr
+		}
+		log.Infof("%s %d %s %s %s (%s) %.2fms", app.hostId, lrw.status, rid, r.Method, r.URL, remote, duration)
 	}
 }
 
@@ -306,6 +350,10 @@ func (app *Application) defaultHandle(w http.ResponseWriter, r *http.Request, ri
 	params := make(map[string]string)
 	w.Header().Set("Server", "Yunion AppServer/Go/2018.4")
 	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Set("X-XSS-Protection", "1; mode=block")
+	if app.isTLS {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
 	isCors := app.handleCORS(w, r)
 	handler := app.getRoot(r.Method).Match(segs, params)
 	if handler != nil {
@@ -347,6 +395,11 @@ func (app *Application) defaultHandle(w http.ResponseWriter, r *http.Request, ri
 			task.appParams = hand.GetAppParams(params, segs)
 			task.appParams.Request = r
 			task.appParams.Response = w
+			if r.Body != nil && r.ContentLength > 0 && getContentType(r) == ContentTypeJson {
+				data, _ := ioutil.ReadAll(r.Body)
+				task.appParams.Body, _ = jsonutils.Parse(data)
+				r.Body = ioutil.NopCloser(bytes.NewBuffer(data))
+			}
 			session.Run(
 				task,
 				currentWorker,
@@ -391,6 +444,7 @@ func (app *Application) addDefaultHandlers() {
 	app.AddDefaultHandler("POST", "/ping", PingHandler, "ping")
 	app.AddDefaultHandler("GET", "/ping", PingHandler, "ping")
 	app.AddDefaultHandler("GET", "/worker_stats", WorkerStatsHandler, "worker_stats")
+	app.AddDefaultHandler("GET", "/process_stats", ProcessStatsHandler, "process_stats")
 }
 
 func timeoutHandle(h http.Handler) http.HandlerFunc {
@@ -491,6 +545,7 @@ func (app *Application) ListenAndServeWithoutCleanup(addr, certFile, keyFile str
 }
 
 func (app *Application) ListenAndServeTLSWithCleanup2(addr string, certFile, keyFile string, onStop func(), isMaster bool) {
+	app.isTLS = true
 	httpSrv := app.initServer(addr)
 	if isMaster {
 		app.addDefaultHandlers()

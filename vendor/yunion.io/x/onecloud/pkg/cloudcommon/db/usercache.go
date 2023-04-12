@@ -62,8 +62,8 @@ func init() {
 	DefaultUserFetcher = UserCacheManager.FetchUserByIdOrName
 }
 
-func (manager *SUserCacheManager) updateUserCache(userCred mcclient.TokenCredential) {
-	manager.Save(context.Background(), userCred.GetUserId(), userCred.GetUserName(),
+func (manager *SUserCacheManager) updateUserCache(ctx context.Context, userCred mcclient.TokenCredential) {
+	manager.Save(ctx, userCred.GetUserId(), userCred.GetUserName(),
 		userCred.GetDomainId(), userCred.GetDomainName())
 }
 
@@ -125,7 +125,7 @@ func (manager *SUserCacheManager) FetchUserFromKeystone(ctx context.Context, idS
 	query.Set("scope", jsonutils.NewString("system"))
 	query.Set("system", jsonutils.JSONTrue)
 
-	s := auth.GetAdminSession(ctx, consts.GetRegion(), "v1")
+	s := auth.GetAdminSession(ctx, consts.GetRegion())
 	user, err := modules.UsersV3.GetById(s, idStr, query)
 	if err != nil {
 		if je, ok := err.(*httputils.JSONClientError); ok && je.Code == 404 {

@@ -32,6 +32,7 @@ type ICloudResource interface {
 	GetId() string
 	GetName() string
 	GetGlobalId() string
+	GetCreatedAt() time.Time
 
 	GetStatus() string
 
@@ -57,9 +58,8 @@ type IVirtualResource interface {
 
 type IBillingResource interface {
 	GetBillingType() string
-	GetCreatedAt() time.Time
 	GetExpiredAt() time.Time
-	SetAutoRenew(autoRenew bool) error
+	SetAutoRenew(bc billing.SBillingCycle) error
 	Renew(bc billing.SBillingCycle) error
 	IsAutoRenew() bool
 }
@@ -90,7 +90,7 @@ type ICloudRegion interface {
 	GetISecurityGroupByName(opts *SecurityGroupFilterOptions) (ICloudSecurityGroup, error)
 	CreateISecurityGroup(conf *SecurityGroupCreateInput) (ICloudSecurityGroup, error)
 
-	CreateIVpc(name string, desc string, cidr string) (ICloudVpc, error)
+	CreateIVpc(opts *VpcCreateOptions) (ICloudVpc, error)
 	CreateInternetGateway() (ICloudInternetGateway, error)
 	CreateEIP(eip *SEip) (ICloudEIP, error)
 
@@ -192,6 +192,13 @@ type ICloudRegion interface {
 
 	GetICloudKubeClusters() ([]ICloudKubeCluster, error)
 	GetICloudKubeClusterById(id string) (ICloudKubeCluster, error)
+
+	GetICloudTablestores() ([]ICloudTablestore, error)
+
+	GetIModelartsPools() ([]ICloudModelartsPool, error)
+	GetIModelartsPoolById(id string) (ICloudModelartsPool, error)
+	CreateIModelartsPool(pool *ModelartsPoolCreateOption) (ICloudModelartsPool, error)
+	GetIModelartsPoolSku() ([]ICloudModelartsPoolSku, error)
 }
 
 type ICloudZone interface {
@@ -210,21 +217,19 @@ type ICloudZone interface {
 type ICloudImage interface {
 	IVirtualResource
 
+	IOSInfo
+
 	Delete(ctx context.Context) error
 	GetIStoragecache() ICloudStoragecache
 
 	GetSizeByte() int64
 	GetImageType() TImageType
 	GetImageStatus() string
-	GetOsType() TOsType
-	GetOsDist() string
-	GetOsVersion() string
-	GetOsArch() string
+
 	GetMinOsDiskSizeGb() int
 	GetMinRamSizeMb() int
 	GetImageFormat() string
-	GetCreatedAt() time.Time
-	UEFI() bool
+
 	GetPublicScope() rbacutils.TRbacScope
 	GetSubImages() []SSubImage
 }
@@ -295,6 +300,8 @@ type ICloudHost interface {
 	GetCpuDesc() string
 	GetCpuMhz() int
 	GetCpuCmtbound() float32
+	GetCpuArchitecture() string
+
 	GetMemSizeMB() int
 	GetMemCmtbound() float32
 	GetReservedMemoryMb() int
@@ -317,8 +324,11 @@ type ICloudVM interface {
 	IBillingResource
 	IVirtualResource
 
+	IOSInfo
+
 	ConvertPublicIpToEip() error
 
+	GetHostname() string
 	GetIHost() ICloudHost
 	GetIHostId() string
 
@@ -327,6 +337,8 @@ type ICloudVM interface {
 
 	GetIEIP() (ICloudEIP, error)
 
+	GetInternetMaxBandwidthOut() int
+	GetThroughput() int
 	// GetStatus() string
 	// GetRemoteStatus() string
 
@@ -337,10 +349,12 @@ type ICloudVM interface {
 	GetBootOrder() string
 	GetVga() string
 	GetVdi() string
-	GetOSArch() string
-	GetOsType() TOsType
-	GetOSName() string
-	GetBios() string
+
+	// GetOSArch() string
+	// GetOsType() TOsType
+	// GetOSName() string
+	// GetBios() string
+
 	GetMachine() string
 	GetInstanceType() string
 
@@ -370,7 +384,7 @@ type ICloudVM interface {
 	AttachDisk(ctx context.Context, diskId string) error
 	DetachDisk(ctx context.Context, diskId string) error
 
-	CreateDisk(ctx context.Context, sizeMb int, uuid string, driver string) error
+	CreateDisk(ctx context.Context, opts *GuestDiskCreateOptions) (string, error)
 
 	MigrateVM(hostid string) error
 	LiveMigrateVM(hostid string) error
@@ -393,7 +407,7 @@ type ICloudNic interface {
 	GetMAC() string
 	InClassicNetwork() bool
 	GetDriver() string
-	GetINetwork() ICloudNetwork
+	GetINetworkId() string
 
 	// GetSubAddress returns non-primary/secondary/alias ipv4 addresses of
 	// the network interface
@@ -414,12 +428,12 @@ type DummyICloudNic struct{}
 
 var _ ICloudNic = DummyICloudNic{}
 
-func (d DummyICloudNic) GetId() string              { panic(errors.ErrNotImplemented) }
-func (d DummyICloudNic) GetIP() string              { panic(errors.ErrNotImplemented) }
-func (d DummyICloudNic) GetMAC() string             { panic(errors.ErrNotImplemented) }
-func (d DummyICloudNic) InClassicNetwork() bool     { panic(errors.ErrNotImplemented) }
-func (d DummyICloudNic) GetDriver() string          { panic(errors.ErrNotImplemented) }
-func (d DummyICloudNic) GetINetwork() ICloudNetwork { panic(errors.ErrNotImplemented) }
+func (d DummyICloudNic) GetId() string          { panic(errors.ErrNotImplemented) }
+func (d DummyICloudNic) GetIP() string          { panic(errors.ErrNotImplemented) }
+func (d DummyICloudNic) GetMAC() string         { panic(errors.ErrNotImplemented) }
+func (d DummyICloudNic) InClassicNetwork() bool { panic(errors.ErrNotImplemented) }
+func (d DummyICloudNic) GetDriver() string      { panic(errors.ErrNotImplemented) }
+func (d DummyICloudNic) GetINetworkId() string  { panic(errors.ErrNotImplemented) }
 func (d DummyICloudNic) GetSubAddress() ([]string, error) {
 	return nil, nil
 }
@@ -501,6 +515,7 @@ type ICloudDisk interface {
 	GetDiskType() string
 	GetFsFormat() string
 	GetIsNonPersistent() bool
+	GetIops() int
 
 	GetDriver() string
 	GetCacheMode() string
@@ -546,10 +561,22 @@ type ICloudSnapshotPolicy interface {
 	GetTimePoints() ([]int, error)
 }
 
-type ICloudVpc interface {
-	// GetGlobalId() // 若vpc属于globalvpc,此函数返回格式必须是 'region.GetGlobalId()/vpc.GetGlobalId()'
+type ICloudGlobalVpc interface {
 	ICloudResource
 
+	Delete() error
+}
+
+type ICloudIPv6Gateway interface {
+	IVirtualResource
+
+	GetInstanceType() string
+}
+
+type ICloudVpc interface {
+	ICloudResource
+
+	GetGlobalVpcId() string
 	IsSupportSetExternalAccess() bool // 是否支持Attach互联网网关.
 	GetExternalAccessMode() string
 	AttachInternetGateway(igwId string) error
@@ -578,6 +605,8 @@ type ICloudVpc interface {
 	GetAuthorityOwnerId() string
 
 	ProposeJoinICloudInterVpcNetwork(opts *SVpcJointInterVpcNetworkOption) error
+
+	GetICloudIPv6Gateways() ([]ICloudIPv6Gateway, error)
 }
 
 type ICloudInternetGateway interface {
@@ -840,6 +869,8 @@ type ICloudProject interface {
 
 	GetDomainId() string
 	GetDomainName() string
+
+	GetAccountId() string
 }
 
 type ICloudNatGateway interface {
@@ -929,6 +960,7 @@ type ICloudDBInstance interface {
 	GetVcpuCount() int
 	GetVmemSizeMB() int //MB
 	GetDiskSizeGB() int
+	GetDiskSizeUsedMB() int
 	//基础版、高可用？
 	GetCategory() string
 	GetStorageType() string
@@ -941,6 +973,7 @@ type ICloudDBInstance interface {
 	GetZone2Id() string
 	GetZone3Id() string
 	GetIVpcId() string
+	GetIops() int
 
 	GetDBNetworks() ([]SDBInstanceNetwork, error)
 	GetIDBInstanceParameters() ([]ICloudDBInstanceParameter, error)
@@ -1032,6 +1065,8 @@ type ICloudElasticcache interface {
 	GetZoneId() string
 	GetNetworkType() string
 	GetNetworkId() string
+	GetBandwidth() int
+	GetConnections() int
 
 	GetPrivateDNS() string
 	GetPrivateIpAddr() string
@@ -1163,6 +1198,10 @@ type IClouduser interface {
 
 	ResetPassword(password string) error
 	IsConsoleLogin() bool
+
+	CreateAccessKey(name string) (*SAccessKey, error)
+	DeleteAccessKey(accessKey string) error
+	GetAccessKeys() ([]SAccessKey, error)
 }
 
 // 公有云子账号权限
@@ -1410,6 +1449,11 @@ type ICloudMongoDB interface {
 	GetInstanceType() string
 	GetMaintainTime() string
 	GetPort() int
+	GetIops() int
+
+	GetMaxConnections() int
+
+	GetNetworkAddress() string
 
 	GetIBackups() ([]SMongoDBBackup, error)
 
@@ -1433,6 +1477,8 @@ type ICloudElasticSearch interface {
 	GetNetworkId() string
 	GetZoneId() string
 	IsMultiAz() bool
+
+	GetAccessInfo() (*ElasticSearchAccessInfo, error)
 
 	Delete() error
 }
@@ -1514,6 +1560,21 @@ type ICloudCDNDomain interface {
 	GetCname() string
 	GetOrigins() *SCdnOrigins
 
+	// 是否忽略参数
+	GetCacheKeys() (*SCDNCacheKeys, error)
+	// 是否分片回源
+	GetRangeOriginPull() (*SCDNRangeOriginPull, error)
+	// 缓存配置
+	GetCache() (*SCDNCache, error)
+	// https配置
+	GetHTTPS() (*SCDNHttps, error)
+	// 强制跳转
+	GetForceRedirect() (*SCDNForceRedirect, error)
+	// 防盗链配置
+	GetReferer() (*SCDNReferer, error)
+	// 浏览器缓存配置
+	GetMaxAge() (*SCDNMaxAge, error)
+
 	Delete() error
 }
 
@@ -1536,4 +1597,8 @@ type ICloudKubeNode interface {
 
 type ICloudKubeNodePool interface {
 	ICloudResource
+}
+
+type ICloudTablestore interface {
+	IVirtualResource
 }

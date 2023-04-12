@@ -225,6 +225,8 @@ type PerformStatusInput struct {
 	Status string `json:"status"`
 	// swagger:ignore
 	BlockJobsCount int `json:"block_jobs_count"`
+	// call from host id
+	HostId string `json:"host_id"`
 
 	// 更改状态的原因描述
 	// required:false
@@ -344,6 +346,15 @@ type PerformUserMetadataInput map[string]string
 // 全量替换资源的用户标签（元数据）输入
 type PerformSetUserMetadataInput map[string]string
 
+type PerformClassMetadataInput map[string]string
+
+type PerformSetClassMetadataInput map[string]string
+
+type GetClassMetadataInput struct {
+}
+
+type GetClassMetadataOutput map[string]string
+
 // 获取资源的元数据输入
 type GetMetadataInput struct {
 	// 指定需要获取的所有标签的KEY列表，如果列表为空，则获取全部标签
@@ -384,4 +395,18 @@ type RenewInput struct {
 }
 
 type SyncstatusInput struct {
+}
+
+type PurgeSplitTableInput struct {
+	Tables []string `json:"tables"`
+}
+
+const (
+	MAX_SPLITABLE_EXPORT_LIMIT = 10000
+)
+
+type SplitTableExportInput struct {
+	Table  string `json:"table"`
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
 }

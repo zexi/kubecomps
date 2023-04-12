@@ -63,6 +63,7 @@ type ReceiveDetail struct {
 	ReceiverId   string    `json:"receiver_id"`
 	ReceiverName string    `json:"receiver_name"`
 	Contact      string    `json:"contact"`
+	ReceiverType string    `json:"receiver_type"`
 	SendAt       time.Time `json:"sendAt"`
 	SendBy       string    `json:"send_by"`
 	Status       string    `json:"status"`
@@ -77,6 +78,7 @@ type NotificationDetails struct {
 	Title          string          `json:"title"`
 	Content        string          `json:"content"`
 	ReceiveDetails []ReceiveDetail `json:"receive_details"`
+	TopicType      string          `json:"topic_type"`
 }
 
 type NotificationListInput struct {
@@ -85,6 +87,7 @@ type NotificationListInput struct {
 	ContactType string
 	ReceiverId  string
 	Tag         string
+	TopicType   string
 }
 
 type SContact struct {

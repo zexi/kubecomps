@@ -61,7 +61,7 @@ type SVirtualResourceBase struct {
 	IsSystem bool `nullable:"true" default:"false" list:"admin" create:"optional" json:"is_system"`
 
 	// 资源放入回收站时间
-	PendingDeletedAt time.Time `json:"pending_deleted_at" list:"user"`
+	PendingDeletedAt time.Time `json:"pending_deleted_at" list:"user" update:"admin"`
 	// 资源是否处于回收站中
 	PendingDeleted bool `nullable:"false" default:"false" index:"true" get:"user" list:"user" json:"pending_deleted"`
 	// 资源是否被冻结
@@ -87,11 +87,7 @@ func (manager *SVirtualResourceBaseManager) GetIVirtualModelManager() IVirtualMo
 	return q
 }*/
 
-func (manager *SVirtualResourceBaseManager) AllowGetPropertyStatistics(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return IsAdminAllowGetSpec(userCred, manager, "statistics")
-}
-
-func (manager *SVirtualResourceBaseManager) GetPropertyStatistics(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) (map[string]apis.StatusStatistic, error) {
+func (manager *SVirtualResourceBaseManager) GetPropertyStatistics(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) (*apis.StatusStatistic, error) {
 	im, ok := manager.GetVirtualObject().(IModelManager)
 	if !ok {
 		im = manager
@@ -120,18 +116,17 @@ func (manager *SVirtualResourceBaseManager) GetPropertyStatistics(ctx context.Co
 		TotalCount          int64
 		PendingDeletedCount int64
 	}
-	result := map[string]apis.StatusStatistic{}
+	result := &apis.StatusStatistic{
+		StatusInfo: []apis.StatusStatisticStatusInfo{},
+	}
 	for _, s := range ret {
-		result[s.Status] = apis.StatusStatistic{
+		result.StatusInfo = append(result.StatusInfo, apis.StatusStatisticStatusInfo{
+			Status:              s.Status,
 			TotalCount:          s.TotalCount,
 			PendingDeletedCount: s.PendingDeletedCount,
-		}
+		})
 	}
 	return result, nil
-}
-
-func (manager *SVirtualResourceBaseManager) AllowGetPropertyProjectStatistics(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return IsAdminAllowGetSpec(userCred, manager, "project-statistics")
 }
 
 func (manager *SVirtualResourceBaseManager) GetPropertyProjectStatistics(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) ([]apis.ProjectStatistic, error) {
@@ -161,10 +156,6 @@ func (manager *SVirtualResourceBaseManager) GetPropertyProjectStatistics(ctx con
 
 	result := []apis.ProjectStatistic{}
 	return result, q.All(&result)
-}
-
-func (manager *SVirtualResourceBaseManager) AllowGetPropertyDomainStatistics(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return IsAdminAllowGetSpec(userCred, manager, "domain-statistics")
 }
 
 func (manager *SVirtualResourceBaseManager) GetPropertyDomainStatistics(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) ([]apis.ProjectStatistic, error) {
@@ -202,15 +193,9 @@ func (manager *SVirtualResourceBaseManager) FilterByHiddenSystemAttributes(q *sq
 	isSystem := jsonutils.QueryBoolean(query, "system", false)
 	if isSystem {
 		var isAllow bool
-		if consts.IsRbacEnabled() {
-			allowScope := policy.PolicyManager.AllowScope(userCred, consts.GetServiceType(), manager.KeywordPlural(), policy.PolicyActionList, "system")
-			if !scope.HigherThan(allowScope) {
-				isAllow = true
-			}
-		} else {
-			if userCred.HasSystemAdminPrivilege() {
-				isAllow = true
-			}
+		allowScope, result := policy.PolicyManager.AllowScope(userCred, consts.GetServiceType(), manager.KeywordPlural(), policy.PolicyActionList, "system")
+		if result.Result.IsAllow() && !scope.HigherThan(allowScope) {
+			isAllow = true
 		}
 		if !isAllow {
 			isSystem = false
@@ -249,15 +234,9 @@ func (manager *SVirtualResourceBaseManager) FilterBySystemAttributes(q *sqlchemy
 	pendingDeleteLower := strings.ToLower(pendingDelete)
 	if pendingDeleteLower == "all" || pendingDeleteLower == "any" || utils.ToBool(pendingDeleteLower) {
 		var isAllow bool
-		if consts.IsRbacEnabled() {
-			allowScope := policy.PolicyManager.AllowScope(userCred, consts.GetServiceType(), manager.KeywordPlural(), policy.PolicyActionList, "pending_delete")
-			if !scope.HigherThan(allowScope) {
-				isAllow = true
-			}
-		} else {
-			if userCred.HasSystemAdminPrivilege() {
-				isAllow = true
-			}
+		allowScope, result := policy.PolicyManager.AllowScope(userCred, consts.GetServiceType(), manager.KeywordPlural(), policy.PolicyActionList, "pending_delete")
+		if result.Result.IsAllow() && !scope.HigherThan(allowScope) {
+			isAllow = true
 		}
 		if !isAllow {
 			pendingDeleteLower = ""
@@ -283,7 +262,7 @@ func (manager *SVirtualResourceBaseManager) FetchByIdOrName(userCred mcclient.II
 
 func (manager *SVirtualResourceBaseManager) ValidateCreateData(ctx context.Context, userCred mcclient.TokenCredential, ownerId mcclient.IIdentityProvider, query jsonutils.JSONObject, input apis.VirtualResourceCreateInput) (apis.VirtualResourceCreateInput, error) {
 	var err error
-	if input.IsSystem != nil && *input.IsSystem && !IsAdminAllowCreate(userCred, manager) {
+	if input.IsSystem != nil && *input.IsSystem && IsAdminAllowCreate(userCred, manager).Result.IsDeny() {
 		return input, httperrors.NewNotSufficientPrivilegeError("non-admin user not allowed to create system object")
 	}
 	input.StatusStandaloneResourceCreateInput, err = manager.SStatusStandaloneResourceBaseManager.ValidateCreateData(ctx, userCred, ownerId, query, input.StatusStandaloneResourceCreateInput)
@@ -306,20 +285,17 @@ func (model *SVirtualResourceBase) CustomizeCreate(ctx context.Context, userCred
 	return model.SStatusStandaloneResourceBase.CustomizeCreate(ctx, userCred, ownerId, query, data)
 }
 
-func (manager *SVirtualResourceBaseManager) AllowListItems(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	isAdmin, err := query.Bool("admin")
-	if err == nil && isAdmin && !IsAdminAllowList(userCred, manager) {
-		return false
+func (model *SVirtualResourceBase) PostCreate(ctx context.Context, userCred mcclient.TokenCredential, ownerId mcclient.IIdentityProvider, query jsonutils.JSONObject, data jsonutils.JSONObject) {
+	project, err := model.GetTenantCache(ctx)
+	if err != nil {
+		log.Errorf("unable to GetTenantCache: %s", err.Error())
+		return
 	}
-	return true
-}
-
-func (model *SVirtualResourceBase) AllowGetDetails(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return model.IsOwner(userCred) || IsAdminAllowGet(userCred, model)
-}
-
-func (manager *SVirtualResourceBaseManager) AllowCreateItem(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, data jsonutils.JSONObject) bool {
-	return true
+	err = InheritFromTo(ctx, project, model)
+	if err != nil {
+		log.Errorf("unable to inherit class metadata from poject %s: %s", project.GetId(), err.Error())
+	}
+	model.SStatusStandaloneResourceBase.PostCreate(ctx, userCred, ownerId, query, data)
 }
 
 func (manager *SVirtualResourceBaseManager) FetchCustomizeColumns(
@@ -355,33 +331,9 @@ func (model *SVirtualResourceBase) PreCheckPerformAction(
 	return nil
 }
 
-func (model *SVirtualResourceBase) AllowUpdateItem(ctx context.Context, userCred mcclient.TokenCredential) bool {
-	return !model.Freezed && (model.IsOwner(userCred) || IsAdminAllowUpdate(userCred, model))
-}
-
-func (model *SVirtualResourceBase) AllowDeleteItem(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, data jsonutils.JSONObject) bool {
-	return model.IsOwner(userCred) || IsAdminAllowDelete(userCred, model)
-}
-
-func (model *SVirtualResourceBase) AllowGetDetailsMetadata(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return model.IsOwner(userCred) || IsAdminAllowGetSpec(userCred, model, "metadata")
-}
-
-func (model *SVirtualResourceBase) AllowPerformMetadata(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, data jsonutils.JSONObject) bool {
-	return model.IsOwner(userCred) || IsAdminAllowPerform(userCred, model, "metadata")
-}
-
-func (model *SVirtualResourceBase) AllowGetDetailsStatus(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return model.IsOwner(userCred) || IsAdminAllowGetSpec(userCred, model, "status")
-}
-
 func (model *SVirtualResourceBase) GetTenantCache(ctx context.Context) (*STenant, error) {
 	// log.Debugf("Get tenant by Id %s", model.ProjectId)
 	return TenantCacheManager.FetchTenantById(ctx, model.ProjectId)
-}
-
-func (model *SVirtualResourceBase) AllowPerformFreeze(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, input apis.PerformFreezeInput) bool {
-	return IsAdminAllowPerform(userCred, model, "freeze")
 }
 
 // freezed update and perform action operation except for unfreeze
@@ -401,10 +353,6 @@ func (model *SVirtualResourceBase) PerformFreeze(ctx context.Context, userCred m
 	return nil, nil
 }
 
-func (model *SVirtualResourceBase) AllowPerformUnfreeze(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, input apis.PerformUnfreezeInput) bool {
-	return IsAdminAllowPerform(userCred, model, "unfreeze")
-}
-
 func (model *SVirtualResourceBase) PerformUnfreeze(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, input apis.PerformUnfreezeInput) (jsonutils.JSONObject, error) {
 	if !model.Freezed {
 		return nil, httperrors.NewBadRequestError("virtual resource not freezed")
@@ -419,10 +367,6 @@ func (model *SVirtualResourceBase) PerformUnfreeze(ctx context.Context, userCred
 	OpsLog.LogEvent(model, ACT_UNFREEZE, "perform unfreeze", userCred)
 	logclient.AddActionLogWithContext(ctx, model, logclient.ACT_UNFREEZE, "perform unfreeze", userCred, true)
 	return nil, nil
-}
-
-func (model *SVirtualResourceBase) AllowPerformChangeOwner(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, input apis.PerformChangeProjectOwnerInput) bool {
-	return IsAdminAllowPerform(userCred, model, "change-owner")
 }
 
 func (model *SVirtualResourceBase) PerformChangeOwner(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject, input apis.PerformChangeProjectOwnerInput) (jsonutils.JSONObject, error) {
@@ -462,9 +406,14 @@ func (model *SVirtualResourceBase) PerformChangeOwner(ctx context.Context, userC
 		requireScope = rbacutils.ScopeDomain
 	}
 
-	allowScope := policy.PolicyManager.AllowScope(userCred, consts.GetServiceType(), model.KeywordPlural(), policy.PolicyActionPerform, "change-owner")
+	allowScope, policyTags := policy.PolicyManager.AllowScope(userCred, consts.GetServiceType(), model.KeywordPlural(), policy.PolicyActionPerform, "change-owner")
 	if requireScope.HigherThan(allowScope) {
 		return nil, errors.Wrapf(httperrors.ErrNotSufficientPrivilege, "require %s allow %s", requireScope, allowScope)
+	}
+
+	err = objectConfirmPolicyTags(ctx, model, policyTags)
+	if err != nil {
+		return nil, errors.Wrap(err, "objectConfirmPolicyTags")
 	}
 
 	q := manager.Query().Equals("name", model.GetName())
@@ -483,6 +432,27 @@ func (model *SVirtualResourceBase) PerformChangeOwner(ctx context.Context, userC
 		log.Warningf("tenant_id %s not found", model.ProjectId)
 		formerObj := NewTenant(model.ProjectId, "unknown", model.DomainId, "unknown")
 		former = &formerObj
+	} else {
+		// check fromer's class metadata
+		cm, err := former.GetAllClassMetadata()
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to GetAllClassMetadata")
+		}
+		if len(cm) > 0 {
+			return nil, httperrors.NewForbiddenError("can't change owner for resource in project with class metadata")
+		}
+	}
+
+	toer, err := TenantCacheManager.FetchTenantById(ctx, ownerId.GetProjectId())
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to get project %s", ownerId.GetProjectId())
+	}
+	toCm, err := toer.GetAllClassMetadata()
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to GetAllClassMetadata")
+	}
+	if model.Keyword() != "image" && len(toCm) > 0 {
+		return nil, httperrors.NewForbiddenError("can't change resource's owner as that in project with class metadata")
 	}
 
 	// clean shared projects before update project id
@@ -527,6 +497,13 @@ func (model *SVirtualResourceBase) PerformChangeOwner(ctx context.Context, userC
 		OldDomain:    former.Domain,
 		NewDomainId:  ownerId.GetProjectDomainId(),
 		NewDomain:    ownerId.GetProjectDomain(),
+	}
+
+	// set class metadata
+
+	err = model.SetClassMetadataAll(ctx, toCm, userCred)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to SetClassMetadataAll")
 	}
 	logclient.AddActionLogWithContext(ctx, model, logclient.ACT_CHANGE_OWNER, notes, userCred, true)
 	return nil, nil
@@ -631,6 +608,8 @@ func (model *SVirtualResourceBase) GetShortDesc(ctx context.Context) *jsonutils.
 	tc, _ := TenantCacheManager.FetchTenantById(ctx, model.ProjectId)
 	if tc != nil {
 		desc.Add(jsonutils.NewString(tc.GetName()), "owner_tenant")
+		metadata, _ := GetVisiableMetadata(ctx, tc, nil)
+		desc.Set("project_tags", jsonutils.Marshal(metadata))
 	}
 	return desc
 }
@@ -714,10 +693,6 @@ func (model *SVirtualResourceBase) ValidateUpdateData(
 	return input, nil
 }
 
-func (model *SVirtualResourceBase) AllowGetDetailsChangeOwnerCandidateDomains(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) bool {
-	return model.IsOwner(userCred) || IsAdminAllowGetSpec(userCred, model, "change-owner-candidate-domains")
-}
-
 func (model *SVirtualResourceBase) GetDetailsChangeOwnerCandidateDomains(ctx context.Context, userCred mcclient.TokenCredential, query jsonutils.JSONObject) (apis.ChangeOwnerCandidateDomainsOutput, error) {
 	return IOwnerResourceBaseModelGetChangeOwnerCandidateDomains(model.GetIVirtualModel())
 }
@@ -732,21 +707,6 @@ func (manager *SVirtualResourceBaseManager) ListItemExportKeys(ctx context.Conte
 		return nil, errors.Wrap(err, "SProjectizedResourceBaseManager.ListItemExportKeys")
 	}
 
-	if keys.Contains("user_tags") {
-		guestUserTagsQuery := Metadata.Query().Startswith("id", manager.keyword+"::").
-			Startswith("key", USER_TAG_PREFIX).GroupBy("id")
-		guestUserTagsQuery.AppendField(sqlchemy.SubStr("resource_id", guestUserTagsQuery.Field("id"), len(manager.keyword)+3, 0))
-		guestUserTagsQuery.AppendField(
-			sqlchemy.GROUP_CONCAT("user_tags", sqlchemy.CONCAT("",
-				sqlchemy.SubStr("", guestUserTagsQuery.Field("key"), len(USER_TAG_PREFIX)+1, 0),
-				sqlchemy.NewStringField(":"),
-				guestUserTagsQuery.Field("value"),
-			)))
-		subQ := guestUserTagsQuery.SubQuery()
-		q.LeftJoin(subQ, sqlchemy.Equals(q.Field("id"), subQ.Field("resource_id")))
-		q.AppendField(subQ.Field("user_tags"))
-	}
-
 	return q, nil
 }
 
@@ -756,4 +716,34 @@ func (manager *SVirtualResourceBaseManager) GetExportExtraKeys(ctx context.Conte
 		res.Set("user_tags", jsonutils.NewString(userTags))
 	}
 	return res
+}
+
+func (manager *SVirtualResourceBaseManager) GetPropertyProjectTagValuePairs(
+	ctx context.Context,
+	userCred mcclient.TokenCredential,
+	query jsonutils.JSONObject,
+) (jsonutils.JSONObject, error) {
+	return GetPropertyTagValuePairs(
+		manager.GetIVirtualModelManager(),
+		"project",
+		"tenant_id",
+		ctx,
+		userCred,
+		query,
+	)
+}
+
+func (manager *SVirtualResourceBaseManager) GetPropertyProjectTagValueTree(
+	ctx context.Context,
+	userCred mcclient.TokenCredential,
+	query jsonutils.JSONObject,
+) (jsonutils.JSONObject, error) {
+	return GetPropertyTagValueTree(
+		manager.GetIVirtualModelManager(),
+		"project",
+		"tenant_id",
+		ctx,
+		userCred,
+		query,
+	)
 }

@@ -34,7 +34,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/moul/http2curl"
+	"moul.io/http2curl/v2"
 
 	"yunion.io/x/jsonutils"
 	"yunion.io/x/pkg/errors"
@@ -459,33 +459,14 @@ func getClientErrorClass(err error) error {
 }
 
 func Request(client sClient, ctx context.Context, method THttpMethod, urlStr string, header http.Header, body io.Reader, debug bool) (*http.Response, error) {
-	req, resp, err := requestInternal(client, ctx, method, urlStr, header, body, debug)
-	if err != nil {
-		var reqBody string
-		if bodySeeker, ok := body.(io.ReadSeeker); ok {
-			bodySeeker.Seek(0, io.SeekStart)
-			reqBodyBytes, _ := ioutil.ReadAll(bodySeeker)
-			if reqBodyBytes != nil {
-				reqBody = string(reqBodyBytes)
-			}
-		}
-		if req == nil {
-			ce := newJsonClientErrorFromRequest2(string(method), urlStr, header, reqBody)
-			ce.Class = getClientErrorClass(err).Error()
-			ce.Details = err.Error()
-			ce.Code = 499
-			return nil, ce
-		}
-		ce := newJsonClientErrorFromRequest(req, reqBody)
-		ce.Class = getClientErrorClass(err).Error()
-		ce.Details = err.Error()
-		ce.Code = 499
-		return nil, ce
-	}
-	return resp, nil
+	return request(client, ctx, method, urlStr, header, body, false, debug)
 }
 
-func requestInternal(client sClient, ctx context.Context, method THttpMethod, urlStr string, header http.Header, body io.Reader, debug bool) (*http.Request, *http.Response, error) {
+func RequestWithRetry(client sClient, ctx context.Context, method THttpMethod, urlStr string, header http.Header, body io.Reader, debug bool) (*http.Response, error) {
+	return request(client, ctx, method, urlStr, header, body, true, debug)
+}
+
+func requestInternal(client sClient, ctx context.Context, method THttpMethod, urlStr string, header http.Header, body io.Reader, retry, debug bool) (*http.Request, *http.Response, error) {
 	if client == nil {
 		client = defaultHttpClient
 	}
@@ -494,14 +475,18 @@ func requestInternal(client sClient, ctx context.Context, method THttpMethod, ur
 	}
 	ctxData := appctx.FetchAppContextData(ctx)
 	var clientTrace *trace.STrace
-	if !ctxData.Trace.IsZero() {
+	if len(ctxData.ServiceName) > 0 {
+		if !ctxData.Trace.IsZero() {
+			clientTrace = &ctxData.Trace
+		}
 		addr, port, err := GetAddrPort(urlStr)
 		if err != nil {
 			return nil, nil, err
 		}
-		clientTrace = trace.StartClientTrace(&ctxData.Trace, addr, port, ctxData.ServiceName)
+		clientTrace = trace.StartClientTrace(clientTrace, addr, port, ctxData.ServiceName)
 		clientTrace.AddClientRequestHeader(header)
 	}
+
 	if len(ctxData.RequestId) > 0 {
 		header.Set("X-Request-Id", ctxData.RequestId)
 	}
@@ -543,7 +528,17 @@ func requestInternal(client sClient, ctx context.Context, method THttpMethod, ur
 			cyan("CURL:", curlCmd, "\n")
 		}
 	}
-	resp, err := client.Do(req)
+	resp, err := func() (*http.Response, error) {
+		var resp *http.Response
+		for i := 0; i < 3; i++ {
+			resp, err = client.Do(req)
+			if err == nil || !retry || !isHTTPReqErrorRetryable(err) {
+				return resp, err
+			}
+			time.Sleep(time.Second * 5)
+		}
+		return resp, err
+	}()
 	if err != nil {
 		red(err.Error())
 		return req, nil, err
@@ -570,7 +565,7 @@ func requestInternal(client sClient, ctx context.Context, method THttpMethod, ur
 	return req, resp, nil
 }
 
-func JSONRequest(client *http.Client, ctx context.Context, method THttpMethod, urlStr string, header http.Header, body jsonutils.JSONObject, debug bool) (http.Header, jsonutils.JSONObject, error) {
+func JSONRequest(client sClient, ctx context.Context, method THttpMethod, urlStr string, header http.Header, body jsonutils.JSONObject, debug bool) (http.Header, jsonutils.JSONObject, error) {
 	var bodystr string
 	if !gotypes.IsNil(body) {
 		bodystr = body.String()
@@ -834,4 +829,65 @@ func JoinPath(ep string, paths ...string) string {
 		buf.WriteString(strings.Trim(path, "/"))
 	}
 	return buf.String()
+}
+
+func request(client sClient, ctx context.Context, method THttpMethod, urlStr string, header http.Header, body io.Reader, retry, debug bool) (*http.Response, error) {
+	req, resp, err := requestInternal(client, ctx, method, urlStr, header, body, retry, debug)
+	if err != nil {
+		var reqBody string
+		if bodySeeker, ok := body.(io.ReadSeeker); ok {
+			bodySeeker.Seek(0, io.SeekStart)
+			reqBodyBytes, _ := ioutil.ReadAll(bodySeeker)
+			if reqBodyBytes != nil {
+				reqBody = string(reqBodyBytes)
+			}
+		}
+		if req == nil {
+			ce := newJsonClientErrorFromRequest2(string(method), urlStr, header, reqBody)
+			ce.Class = getClientErrorClass(err).Error()
+			ce.Details = err.Error()
+			ce.Code = 499
+			return nil, ce
+		}
+		ce := newJsonClientErrorFromRequest(req, reqBody)
+		ce.Class = getClientErrorClass(err).Error()
+		ce.Details = err.Error()
+		ce.Code = 499
+		return nil, ce
+	}
+	return resp, nil
+}
+
+func isHTTPReqErrorRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch e := err.(type) {
+	case *url.Error:
+		switch e.Err.(type) {
+		case *net.DNSError, *net.OpError, net.UnknownNetworkError:
+			return true
+		}
+		if strings.Contains(err.Error(), "Connection closed by foreign host") {
+			return true
+		} else if strings.Contains(err.Error(), "net/http: TLS handshake timeout") {
+			// If error is - tlsHandshakeTimeoutError, retry.
+			return true
+		} else if strings.Contains(err.Error(), "i/o timeout") {
+			// If error is - tcp timeoutError, retry.
+			return true
+		} else if strings.Contains(err.Error(), "connection timed out") {
+			// If err is a net.Dial timeout, retry.
+			return true
+		} else if strings.Contains(err.Error(), "net/http: HTTP/1.x transport connection broken") {
+			// If error is transport connection broken, retry.
+			return true
+		} else if strings.Contains(err.Error(), "net/http: timeout awaiting response headers") {
+			// Retry errors due to server not sending the response before timeout
+			return true
+		} else if strings.Contains(err.Error(), "dial tcp: lookup") {
+			return true
+		}
+	}
+	return false
 }

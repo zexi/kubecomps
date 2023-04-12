@@ -37,23 +37,23 @@ type SSecgroupRuleResource struct {
 	//
 	//
 	//
-	// | protocol | name	|
-	// | -------- | ----	|
-	// | any	  | 所有协议|
-	// | tcp	  | TCP		|
-	// | icmp	  | ICMP	|
-	// | udp	  | UDP 	|
+	// | protocol | name    |
+	// | -------- | ----    |
+	// | any      | 所有协议|
+	// | tcp      | TCP     |
+	// | icmp     | ICMP    |
+	// | udp      | UDP     |
 	// enum: any, tcp, udp, icmp
 	Protocol string `json:"protocol"`
 
 	// 端口列表, 参数为空代表任意端口
 	// 此参数仅对protocol是tcp, udp时生效
 	// 支持格式:
-	// | 格式类型 | 举例	|
-	// | -------- | ----	|
-	// | 单端口	  | 22		|
-	// | 端口范围 | 100-200	|
-	// | 不连续端口| 80,443	|
+	// | 格式类型 | 举例    |
+	// | -------- | ----    |
+	// | 单端口   | 22      |
+	// | 端口范围 | 100-200 |
+	// | 不连续端口| 80,443 |
 	// requried: false
 	Ports string `json:"ports"`
 
@@ -237,13 +237,13 @@ type SecgroupDetails struct {
 	apis.SharableVirtualResourceDetails
 	SSecurityGroup
 
-	// 关联云主机数量
+	// 关联云主机数量, 不包含回收站云主机
 	GuestCnt int `json:"guest_cnt,allowempty"`
 
-	// 关联此安全组的云主机is_system为true数量
+	// 关联此安全组的云主机is_system为true数量, , 不包含回收站云主机
 	SystemGuestCnt int `json:"system_guest_cnt,allowempty"`
 
-	// admin_secgrp_id为此安全组的云主机数量
+	// admin_secgrp_id为此安全组的云主机数量, , 不包含回收站云主机
 	AdminGuestCnt int `json:"admin_guest_cnt,allowempty"`
 
 	// 安全组缓存数量
@@ -320,4 +320,16 @@ type SecgroupImportRulesInput struct {
 type SecgroupJsonDesc struct {
 	Id   string `json:"id"`
 	Name string `json:"name"`
+}
+
+type SSecurityGroupRef struct {
+	GuestCnt      int `json:"guest_cnt"`
+	AdminGuestCnt int `json:"admin_guest_cnt"`
+	RdsCnt        int `json:"rds_cnt"`
+	RedisCnt      int `json:"redis_cnt"`
+	TotalCnt      int `json:"total_cnt"`
+}
+
+func (self *SSecurityGroupRef) Sum() {
+	self.TotalCnt = self.GuestCnt + self.AdminGuestCnt + self.RdsCnt + self.RedisCnt
 }

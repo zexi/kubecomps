@@ -15,9 +15,11 @@
 package cloudprovider
 
 import (
+	"encoding/base64"
 	"strings"
 
 	"yunion.io/x/jsonutils"
+	"yunion.io/x/pkg/errors"
 	"yunion.io/x/pkg/util/osprofile"
 
 	"yunion.io/x/onecloud/pkg/util/ansible"
@@ -32,6 +34,22 @@ var (
 	OsTypeLinux   = TOsType(osprofile.OS_TYPE_LINUX)
 	OsTypeWindows = TOsType(osprofile.OS_TYPE_WINDOWS)
 )
+
+type TBiosType string
+
+var (
+	BIOS = TBiosType("BIOS")
+	UEFI = TBiosType("UEFI")
+)
+
+func ToBiosType(bios string) TBiosType {
+	switch strings.ToLower(bios) {
+	case "uefi", "efi":
+		return UEFI
+	default:
+		return BIOS
+	}
+}
 
 type SDistDefaultAccount struct {
 	// 操作系统发行版
@@ -86,6 +104,13 @@ type SDiskInfo struct {
 	Name              string
 }
 
+type GuestDiskCreateOptions struct {
+	SizeMb    int
+	UUID      string
+	Driver    string
+	StorageId string
+}
+
 const (
 	CLOUD_SHELL                 = "cloud-shell"
 	CLOUD_SHELL_WITHOUT_ENCRYPT = "cloud-shell-without-encrypt"
@@ -106,6 +131,8 @@ type ServerStopOptions struct {
 
 type SManagedVMCreateConfig struct {
 	Name                string
+	NameEn              string
+	Hostname            string
 	ExternalImageId     string
 	ImageType           string
 	OsType              string
@@ -115,6 +142,7 @@ type SManagedVMCreateConfig struct {
 	Cpu                 int
 	MemoryMB            int
 	ExternalNetworkId   string
+	ExternalVpcId       string
 	IpAddr              string
 	Description         string
 	SysDisk             SDiskInfo
@@ -132,6 +160,11 @@ type SManagedVMCreateConfig struct {
 	Tags map[string]string
 
 	BillingCycle *billing.SBillingCycle
+
+	IsNeedInjectPasswordByCloudInit bool
+	UserDataType                    string
+	WindowsUserDataType             string
+	IsWindowsUserDataTypeNeedEncode bool
 }
 
 type SManagedVMChangeConfig struct {
@@ -150,8 +183,17 @@ type SManagedVMRebuildRootConfig struct {
 }
 
 func (vmConfig *SManagedVMCreateConfig) GetConfig(config *jsonutils.JSONDict) error {
-	if err := config.Unmarshal(vmConfig, "desc"); err != nil {
-		return err
+	err := config.Unmarshal(vmConfig, "desc")
+	if err != nil {
+		return errors.Wrapf(err, "config.Unmarshal")
+	}
+	if !vmConfig.IsNeedInjectPasswordByCloudInit {
+		if len(vmConfig.UserData) > 0 {
+			_, err := cloudinit.ParseUserData(vmConfig.UserData)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	if publicKey, _ := config.GetString("public_key"); len(publicKey) > 0 {
 		vmConfig.PublicKey = publicKey
@@ -160,15 +202,19 @@ func (vmConfig *SManagedVMCreateConfig) GetConfig(config *jsonutils.JSONDict) er
 	if strings.ToLower(vmConfig.OsType) == strings.ToLower(osprofile.OS_TYPE_LINUX) {
 		adminPublicKey, _ := config.GetString("admin_public_key")
 		projectPublicKey, _ := config.GetString("project_public_key")
-		oUserData, _ := config.GetString("user_data")
-
-		vmConfig.UserData = generateUserData(adminPublicKey, projectPublicKey, oUserData)
+		vmConfig.UserData = generateUserData(adminPublicKey, projectPublicKey, vmConfig.UserData)
 	}
 
 	resetPassword := jsonutils.QueryBoolean(config, "reset_password", false)
 	vmConfig.Password, _ = config.GetString("password")
 	if resetPassword && len(vmConfig.Password) == 0 {
 		vmConfig.Password = seclib2.RandomPassword2(12)
+	}
+	if vmConfig.IsNeedInjectPasswordByCloudInit {
+		err = vmConfig.InjectPasswordByCloudInit()
+		if err != nil {
+			return errors.Wrapf(err, "InjectPasswordByCloudInit")
+		}
 	}
 	return nil
 }
@@ -197,6 +243,42 @@ func generateUserData(adminPublicKey, projectPublicKey, oUserData string) string
 	}
 
 	return cloudConfig.UserData()
+}
+
+func (vmConfig *SManagedVMCreateConfig) GetUserData() (string, error) {
+	if len(vmConfig.UserData) == 0 {
+		return "", nil
+	}
+	oUserData, err := cloudinit.ParseUserData(vmConfig.UserData)
+	if err != nil {
+		// 用户输入非标准cloud-init数据
+		if !vmConfig.IsNeedInjectPasswordByCloudInit {
+			return base64.StdEncoding.EncodeToString([]byte(vmConfig.UserData)), nil
+		}
+		return "", err
+	}
+	if strings.ToLower(vmConfig.OsType) == strings.ToLower(osprofile.OS_TYPE_LINUX) {
+		switch vmConfig.UserDataType {
+		case CLOUD_SHELL:
+			return oUserData.UserDataScriptBase64(), nil
+		case CLOUD_SHELL_WITHOUT_ENCRYPT:
+			return oUserData.UserDataScript(), nil
+		default:
+			return oUserData.UserDataBase64(), nil
+		}
+	} else {
+		userData := ""
+		switch vmConfig.WindowsUserDataType {
+		case CLOUD_EC2:
+			userData = oUserData.UserDataEc2()
+		default:
+			userData = oUserData.UserDataPowerShell()
+		}
+		if vmConfig.IsWindowsUserDataTypeNeedEncode {
+			userData = base64.StdEncoding.EncodeToString([]byte(userData))
+		}
+		return userData, nil
+	}
 }
 
 func (vmConfig *SManagedVMCreateConfig) InjectPasswordByCloudInit() error {
@@ -237,29 +319,29 @@ type ServerVncInput struct {
 
 // +onecloud:model-api-gen
 type ServerVncOutput struct {
-	Id string
+	Id string `json:"id"`
 
 	// baremetal
-	HostId string
-	Zone   string
+	HostId string `json:"host_id"`
+	Zone   string `json:"zone"`
 
 	// kvm host ip
-	Host     string
-	Protocol string
-	Port     int64
+	Host     string `json:"host"`
+	Protocol string `json:"protocol"`
+	Port     int64  `json:"port"`
 
-	Url          string
-	InstanceId   string
-	InstanceName string
-	Password     string
-	VncPassword  string
+	Url          string `json:"url"`
+	InstanceId   string `json:"instance_id"`
+	InstanceName string `json:"instance_name"`
+	Password     string `json:"password"`
+	VncPassword  string `json:"vnc_password"`
 
-	OsName string
+	OsName string `json:"os_name"`
 
 	// cloudpods
-	ApiServer     string
-	ConnectParams string
-	Session       string
+	ApiServer     string `json:"api_server"`
+	ConnectParams string `json:"connect_params"`
+	Session       string `json:"session"`
 
-	Hypervisor string
+	Hypervisor string `json:"hypervisor"`
 }

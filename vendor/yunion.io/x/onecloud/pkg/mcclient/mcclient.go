@@ -98,6 +98,14 @@ func (this *Client) SetHttpTransportProxyFunc(proxyFunc httputils.TransportProxy
 	httputils.SetClientProxyFunc(this.httpconn, proxyFunc)
 }
 
+func (this *Client) GetClient() *http.Client {
+	return this.httpconn
+}
+
+func (this *Client) SetTransport(ts http.RoundTripper) {
+	this.httpconn.Transport = ts
+}
+
 func (this *Client) SetDebug(debug bool) {
 	this.debug = debug
 }
@@ -349,7 +357,7 @@ func (this *Client) GetCommonEtcdEndpoint(token TokenCredential, region, interfa
 		return nil, errors.Errorf("current version %s not support get internal etcd endpoint", this.AuthVersion())
 	}
 
-	_, err := this.GetServiceCatalog().GetServiceURL(apis.SERVICE_TYPE_ETCD, region, "", interfaceType)
+	_, err := this.GetServiceCatalog().getServiceURL(apis.SERVICE_TYPE_ETCD, region, "", interfaceType)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +401,7 @@ func (this *Client) GetCommonEtcdTLSConfig(endpoint *api.EndpointDetails) (*tls.
 	return seclib2.InitTLSConfigByData(caData, certData, keyData)
 }
 
-func (this *Client) NewSession(ctx context.Context, region, zone, endpointType string, token TokenCredential, apiVersion string) *ClientSession {
+func (this *Client) NewSession(ctx context.Context, region, zone, endpointType string, token TokenCredential) *ClientSession {
 	cata := token.GetServiceCatalog()
 	if this.GetServiceCatalog() == nil {
 		if cata == nil || cata.Len() == 0 {
@@ -412,7 +420,6 @@ func (this *Client) NewSession(ctx context.Context, region, zone, endpointType s
 		zone:                zone,
 		endpointType:        endpointType,
 		token:               token,
-		defaultApiVersion:   apiVersion,
 		Header:              http.Header{},
 		customizeServiceUrl: map[string]string{},
 	}
