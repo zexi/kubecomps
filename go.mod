@@ -8,7 +8,7 @@ require (
 	github.com/ceph/go-ceph v0.0.0-20181217221554-e32f9f0f2e94
 	github.com/containernetworking/cni v1.0.0
 	github.com/containernetworking/plugins v0.8.7
-	github.com/fsnotify/fsnotify v1.5.1
+	github.com/fsnotify/fsnotify v1.5.4
 	github.com/ghodss/yaml v1.0.0
 	github.com/gofrs/flock v0.8.0
 	github.com/goharbor/go-client v0.26.2
@@ -44,6 +44,7 @@ require (
 	yunion.io/x/log v1.0.1-0.20230411060016-feb3f46ab361
 	yunion.io/x/onecloud v0.0.0-20240205032410-08f92a8d89aa
 	yunion.io/x/pkg v1.10.1-0.20240127153242-cdf9dc071f4f
+	yunion.io/x/sdnagent v1.2.10-0.20240129094758-082d26e0e076
 	yunion.io/x/sqlchemy v1.1.3-0.20240103021517-2be4fb49bd3b
 )
 
@@ -83,6 +84,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deislabs/oras v0.8.1 // indirect
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
+	github.com/digitalocean/go-openvswitch v0.0.0-20190515160856-1141932ed5cf // indirect
 	github.com/docker/cli v0.0.0-20200130152716-5d0cf8839492 // indirect
 	github.com/docker/distribution v2.7.1+incompatible // indirect
 	github.com/docker/docker v1.4.2-0.20200309214505-aa6a9891b09c // indirect
@@ -246,6 +248,7 @@ require (
 )
 
 replace (
+	github.com/digitalocean/go-openvswitch => github.com/yousong/go-openvswitch v0.0.0-20200422025222-6b2d502be872
 	github.com/go-logr/logr => github.com/go-logr/logr v0.4.0
 
 	github.com/go-openapi/analysis => github.com/go-openapi/analysis v0.19.8

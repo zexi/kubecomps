@@ -173,6 +173,9 @@ github.com/deislabs/oras/pkg/oras
 # github.com/dgrijalva/jwt-go v3.2.0+incompatible
 ## explicit
 github.com/dgrijalva/jwt-go
+# github.com/digitalocean/go-openvswitch v0.0.0-20190515160856-1141932ed5cf => github.com/yousong/go-openvswitch v0.0.0-20200422025222-6b2d502be872
+## explicit
+github.com/digitalocean/go-openvswitch/ovs
 # github.com/docker/cli v0.0.0-20200130152716-5d0cf8839492
 ## explicit
 github.com/docker/cli/cli/config
@@ -256,8 +259,8 @@ github.com/exponent-io/jsonpath
 # github.com/fatih/color v1.13.0
 ## explicit; go 1.13
 github.com/fatih/color
-# github.com/fsnotify/fsnotify v1.5.1
-## explicit; go 1.13
+# github.com/fsnotify/fsnotify v1.5.4
+## explicit; go 1.16
 github.com/fsnotify/fsnotify
 # github.com/ghodss/yaml v1.0.0
 ## explicit
@@ -1793,6 +1796,10 @@ yunion.io/x/pkg/utils
 # yunion.io/x/s3cli v0.0.0-20190917004522-13ac36d8687e
 ## explicit; go 1.12
 yunion.io/x/s3cli
+# yunion.io/x/sdnagent v1.2.10-0.20240129094758-082d26e0e076
+## explicit; go 1.18
+yunion.io/x/sdnagent/pkg/agent
+yunion.io/x/sdnagent/pkg/agent/proto
 # yunion.io/x/sqlchemy v1.1.3-0.20240103021517-2be4fb49bd3b
 ## explicit; go 1.17
 yunion.io/x/sqlchemy
@@ -1803,6 +1810,7 @@ yunion.io/x/sqlchemy/backends/sqlite
 # yunion.io/x/structarg v0.0.0-20231017124457-df4d5009457c
 ## explicit; go 1.12
 yunion.io/x/structarg
+# github.com/digitalocean/go-openvswitch => github.com/yousong/go-openvswitch v0.0.0-20200422025222-6b2d502be872
 # github.com/go-logr/logr => github.com/go-logr/logr v0.4.0
 # github.com/go-openapi/analysis => github.com/go-openapi/analysis v0.19.8
 # github.com/go-openapi/loads => github.com/go-openapi/loads v0.19.3
