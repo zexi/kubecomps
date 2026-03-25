@@ -14,6 +14,7 @@ import (
 
 	"yunion.io/x/jsonutils"
 	"yunion.io/x/log"
+	"yunion.io/x/onecloud/pkg/apis"
 	"yunion.io/x/onecloud/pkg/appsrv"
 	"yunion.io/x/onecloud/pkg/appsrv/dispatcher"
 	"yunion.io/x/onecloud/pkg/cloudcommon/db"
@@ -56,9 +57,10 @@ func init() {
 type SContainerRegistry struct {
 	db.SSharableVirtualResourceBase
 
-	Url    string               `width:"256" charset:"ascii" nullable:"false" create:"required" update:"user" list:"user"`
-	Type   string               `charset:"ascii" width:"128" create:"required" nullable:"true" list:"user"`
-	Config jsonutils.JSONObject `nullable:"true" create:"optional"`
+	Url          string               `width:"256" charset:"ascii" nullable:"false" create:"required" update:"user" list:"user"`
+	Type         string               `charset:"ascii" width:"128" create:"required" nullable:"true" list:"user"`
+	CredentialId string               `width:"256" charset:"ascii" nullable:"true" create:"optional"`
+	Config       jsonutils.JSONObject `nullable:"true" create:"optional"`
 }
 
 func (man *SContainerRegistryManager) AddDispatcher(prefix string, app *appsrv.Application, manager dispatcher.IModelDispatchHandler) {
@@ -118,6 +120,42 @@ func (man *SContainerRegistryManager) ValidateCreateData(ctx context.Context, us
 	}
 
 	return data, err
+}
+
+type ContainerRegistryCreateInput struct {
+	apis.SharableVirtualResourceCreateInput
+
+	// Repo type
+	// required: true
+	// enum: harbor
+	Type api.ContainerRegistryType `json:"type"`
+
+	// Repo URL
+	// required: true
+	// example: https://10.127.190.187/yunionio
+	Url string `json:"url"`
+
+	// Credential ID
+	CredentialId string `json:"credential_id"`
+}
+
+func (r *SContainerRegistry) CustomizeCreate(ctx context.Context, userCred mcclient.TokenCredential, ownerId mcclient.IIdentityProvider, query jsonutils.JSONObject, data jsonutils.JSONObject) error {
+	input := new(api.ContainerRegistryCreateInput)
+	if err := data.Unmarshal(input); err != nil {
+		return errors.Wrap(err, "unmarshal container registry create input")
+	}
+	drv, err := GetContainerRegistryManager().GetDriver(input.Type)
+	if err != nil {
+		return errors.Wrap(err, "get container registry driver")
+	}
+	credentialId, err := drv.CreateCredential(ctx, userCred, ownerId, query, input)
+	if err != nil {
+		return errors.Wrap(err, "create credential")
+	}
+	r.CredentialId = credentialId
+	// clear config, all credential info is stored in credential
+	r.Config = nil
+	return nil
 }
 
 func (r *SContainerRegistry) GetConfig() (*api.ContainerRegistryConfig, error) {
@@ -307,8 +345,10 @@ func (man *SContainerRegistryManager) GetPropertyDownloadImage(ctx context.Conte
 	drv, _ := man.GetDriver(api.ContainerRegistryTypeCommon)
 	conf := &api.ContainerRegistryConfig{
 		Common: &api.ContainerRegistryConfigCommon{
-			Username: query.Username,
-			Password: query.Password,
+			ContainerPullImageAuthConfig: apis.ContainerPullImageAuthConfig{
+				Username: query.Username,
+				Password: query.Password,
+			},
 		},
 	}
 	imgPathParts := strings.Split(imgPath, "/")
